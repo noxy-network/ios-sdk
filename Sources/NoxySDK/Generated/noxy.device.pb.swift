@@ -264,6 +264,12 @@ struct Noxy_Device_RegisterDevice: Sendable {
 
   var signature: Data = Data()
 
+  var apnToken: String = String()
+
+  var fcmToken: String = String()
+
+  var type: String = String()
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
@@ -299,6 +305,10 @@ struct Noxy_Device_SubscribeNotifications: Sendable {
   var hasSubscribe: Bool {self._subscribe != nil}
   /// Clears the value of `subscribe`. Subsequent reads from it will return its default value.
   mutating func clearSubscribe() {self._subscribe = nil}
+
+  var apnToken: String = String()
+
+  var fcmToken: String = String()
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -807,27 +817,23 @@ extension Noxy_Device_Authenticate: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".RegisterDevice"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_pubkeys\0\u{3}wallet_address\0\u{1}signature\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_pubkeys\0\u{3}wallet_address\0\u{1}signature\0\u{3}apn_token\0\u{3}fcm_token\0\u{4}type\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._devicePubkeys) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.walletAddress) }()
       case 3: try { try decoder.decodeSingularBytesField(value: &self.signature) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.apnToken) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.fcmToken) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.type) }()
       default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
     try { if let v = self._devicePubkeys {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
@@ -837,6 +843,15 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.signature.isEmpty {
       try visitor.visitSingularBytesField(value: self.signature, fieldNumber: 3)
     }
+    if !self.apnToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.apnToken, fieldNumber: 4)
+    }
+    if !self.fcmToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.fcmToken, fieldNumber: 5)
+    }
+    if !self.type.isEmpty {
+      try visitor.visitSingularStringField(value: self.type, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -844,6 +859,9 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs._devicePubkeys != rhs._devicePubkeys {return false}
     if lhs.walletAddress != rhs.walletAddress {return false}
     if lhs.signature != rhs.signature {return false}
+    if lhs.apnToken != rhs.apnToken {return false}
+    if lhs.fcmToken != rhs.fcmToken {return false}
+    if lhs.type != rhs.type {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -886,33 +904,36 @@ extension Noxy_Device_DevicePublicKeys: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 extension Noxy_Device_SubscribeNotifications: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".SubscribeNotifications"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}subscribe\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}subscribe\0\u{3}apn_token\0\u{3}fcm_token\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self._subscribe) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.apnToken) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.fcmToken) }()
       default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
     try { if let v = self._subscribe {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
     } }()
+    if !self.apnToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.apnToken, fieldNumber: 2)
+    }
+    if !self.fcmToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.fcmToken, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   static func ==(lhs: Noxy_Device_SubscribeNotifications, rhs: Noxy_Device_SubscribeNotifications) -> Bool {
     if lhs._subscribe != rhs._subscribe {return false}
+    if lhs.apnToken != rhs.apnToken {return false}
+    if lhs.fcmToken != rhs.fcmToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

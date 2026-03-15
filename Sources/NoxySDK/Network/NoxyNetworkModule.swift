@@ -31,46 +31,25 @@ public final class NoxyNetworkModule: @unchecked Sendable {
     private func setSessionId(_ v: String?) { _sessionId = v }
     private func setNetworkDeviceId(_ v: String?) { _networkDeviceId = v }
 
-    /// Parse relay URL into host and port
-    private func parseRelayURL(_ urlString: String) throws -> (host: String, port: Int, useTLS: Bool) {
+    /// Parse relay URL into host and port. Requires HTTPS.
+    private func parseRelayURL(_ urlString: String) throws -> (host: String, port: Int) {
         guard let url = URL(string: urlString),
               let host = url.host, !host.isEmpty else {
             throw NoxyError.general("Invalid relay URL: \(urlString)")
         }
-        let port = url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 50051)
-        let useTLS = url.scheme?.lowercased() == "https"
-        return (host, port, useTLS)
+        guard url.scheme?.lowercased() == "https" else {
+            throw NoxyError.general("Relay URL must use HTTPS")
+        }
+        let port = url.port ?? 443
+        return (host, port)
     }
 
-    /// Connect to relay via gRPC
+    /// Connect to relay via gRPC (always TLS)
     public func connect() async throws {
-        let (host, port, useTLS) = try parseRelayURL(options.relayUrl)
-
-        let transportSecurity: GRPCChannelPool.Configuration.TransportSecurity
-        let group: EventLoopGroup
-
-        if useTLS {
-            #if canImport(NIOSSL)
-            if options.insecureSkipTLSVerification {
-                group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-                let tlsConfig = GRPCTLSConfiguration.makeClientConfigurationBackedByNIOSSL(
-                    certificateVerification: .none
-                )
-                transportSecurity = .tls(tlsConfig)
-            } else {
-                group = PlatformSupport.makeEventLoopGroup(loopCount: 1)
-                let tlsConfig = GRPCTLSConfiguration.makeClientDefault(compatibleWith: group)
-                transportSecurity = .tls(tlsConfig)
-            }
-            #else
-            group = PlatformSupport.makeEventLoopGroup(loopCount: 1)
-            let tlsConfig = GRPCTLSConfiguration.makeClientDefault(compatibleWith: group)
-            transportSecurity = .tls(tlsConfig)
-            #endif
-        } else {
-            group = PlatformSupport.makeEventLoopGroup(loopCount: 1)
-            transportSecurity = .plaintext
-        }
+        let (host, port) = try parseRelayURL(options.relayUrl)
+        let group = PlatformSupport.makeEventLoopGroup(loopCount: 1)
+        let tlsConfig = GRPCTLSConfiguration.makeClientDefault(compatibleWith: group)
+        let transportSecurity: GRPCChannelPool.Configuration.TransportSecurity = .tls(tlsConfig)
 
         eventLoopGroup = group
 
@@ -223,7 +202,8 @@ public final class NoxyNetworkModule: @unchecked Sendable {
     public func announceDevice(
         devicePubkeys: (publicKey: Data, pqPublicKey: Data),
         walletAddress: WalletAddress,
-        signature: Data
+        signature: Data,
+        apnToken: String? = nil
     ) async throws {
         var req = Noxy_Device_DeviceRequest()
         req.payload = .registerDevice(Noxy_Device_RegisterDevice.with { reg in
@@ -233,6 +213,8 @@ public final class NoxyNetworkModule: @unchecked Sendable {
             }
             reg.walletAddress = walletAddress
             reg.signature = signature
+            reg.type = "ios"
+            if let tok = apnToken, !tok.isEmpty { reg.apnToken = tok }
         })
 
         let resp = try await sendAndWait(req)
@@ -277,13 +259,15 @@ public final class NoxyNetworkModule: @unchecked Sendable {
 
     /// Subscribe to notifications stream
     public func subscribeToNotifications(
-        handler: @escaping (NoxyEncryptedNotification) async -> Void
+        handler: @escaping (NoxyEncryptedNotification) async -> Void,
+        apnToken: String? = nil
     ) async throws {
         pushHandler = handler
 
         var req = Noxy_Device_DeviceRequest()
         req.payload = .subscribeNotifications(Noxy_Device_SubscribeNotifications.with { sub in
             sub.subscribe = true
+            if let tok = apnToken, !tok.isEmpty { sub.apnToken = tok }
         })
         if let deviceId = currentDeviceId { req.deviceID = deviceId }
         if let sessionId = currentSessionId { req.sessionID = sessionId }

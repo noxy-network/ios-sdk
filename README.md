@@ -1,4 +1,4 @@
-# Noxy iOS SDK
+# 📦 @noxy-network/ios-sdk
 
 **Noxy** is a decentralized push notification network for Web3 apps. This SDK lets your iOS app receive secure, end-to-end encrypted notifications using **wallet-based identity** — no emails or phone numbers.
 
@@ -16,10 +16,91 @@ Users register a device once with a wallet signature. After that, they receive r
 
 ---
 
-## Requirements
+## API Reference
 
-- iOS 15+ / macOS 12+
-- Swift 5.9+
+### Main Entry Point: `createNoxyClient`
+
+```swift
+func createNoxyClient(
+    identity: NoxyIdentity,
+    network: NoxyNetworkOptions,
+    storage: NoxyStorage = NoxyStorage()
+) -> NoxyClient
+```
+
+| Parameter | Required | Type | Description |
+|-----------|----------|------|-------------|
+| `identity` | **Yes** | `NoxyIdentity` | EOA or SCW wallet identity with signer. |
+| `network` | **Yes** | `NoxyNetworkOptions` | Relay URL and app configuration. |
+| `storage` | No | `NoxyStorage` | Custom secure storage. Default: Keychain. |
+
+---
+
+### NoxyNetworkOptions
+
+| Parameter | Required | Type | Default | Description |
+|-----------|----------|------|---------|-------------|
+| `appId` | **Yes** | `String` | — | Application identifier from Noxy. |
+| `relayUrl` | **Yes** | `String` | — | gRPC endpoint (e.g. `"https://relay.noxy.network"`). |
+| `maxRetries` | No | `Int` | `5` | Max retries for transient failures. |
+| `retryTimeoutMs` | No | `UInt64` | `15_000` | Retry timeout in milliseconds. |
+| `requireAck` | No | `Bool` | `false` | Require acknowledgment for push delivery. |
+| `apnToken` | No | `String?` | `nil` | APNs token for wake-up pushes. When set, app works **online + offline**; when nil, **online only**. |
+
+---
+
+### NoxyIdentity & Wallet Identity
+
+**NoxyEoaWalletIdentity** / **NoxyScwWalletIdentity**:
+
+| Parameter | Required | Type | Default | Description |
+|-----------|----------|------|---------|-------------|
+| `address` | **Yes** | `WalletAddress` | — | EVM-style address (e.g. `0x742d35Cc...`). |
+| `signer` | **Yes** | `(Data) async throws -> Signature` | — | Closure that signs data and returns `Signature(bytes:)`. |
+| `chainId` | No | `String?` | `nil` | Chain ID for context. |
+| `publicKey` | No | `Data?` | `nil` | Public key (if available). |
+| `publicKeyType` | No | `NoxyIdentityCryptoKeyType?` | `nil` | Key type (e.g. `secp256k1`). |
+
+---
+
+### NoxyStorage
+
+| Parameter | Required | Type | Default | Description |
+|-----------|----------|------|---------|-------------|
+| `serviceName` | No | `String` | `"network.noxy.sdk"` | Keychain service identifier. |
+| `accessGroup` | No | `String?` | `nil` | Keychain access group for app extensions. |
+| `accessibility` | No | `NoxyStorageAccessibility` | `.whenPasscodeSetThisDeviceOnly` | Keychain accessibility. Use `.whenUnlockedThisDeviceOnly` for Simulator. |
+
+---
+
+### NoxyClient Methods
+
+| Method | Description |
+|--------|-------------|
+| `initialize()` | Load or create device, connect to relay, authenticate |
+| `setApnsToken(_:)` | Register APNs token for wake-up pushes when backgrounded |
+| `on(handler:)` | Subscribe to notifications; handler receives `[String: Any]` |
+| `handleWakeUpNotification(fetchCompletionHandler:)` | Reconnect and fetch when woken by APNs |
+| `revokeDevice()` | Revoke device locally and on relay |
+| `rotateKeys()` | Rotate device keys locally and on relay |
+| `close()` | Disconnect from relay |
+
+**Properties:** `address`, `isDeviceActive`, `isRelayConnected`, `isNetworkReady`
+
+---
+
+### NoxyError
+
+| Case | When |
+|------|------|
+| `initializationFailed(String)` | Device creation or setup fails. |
+| `general(String)` | Revoke, rotate, auth, or other operation fails. |
+
+---
+
+### Notification Payload
+
+The handler receives a decrypted `[String: Any]` (JSON object). Common fields: `title`, `body`, `data`.
 
 ---
 
@@ -44,6 +125,14 @@ dependencies: [
 ],
 ```
 
+### Build requirements
+
+- **Xcode 15+** or **Swift 5.9+**
+- **Remote install:** The repo must be tagged (e.g. `1.0.0`) for the URL to resolve.
+- **Xcode app projects:** Add the package via **File → Add Package Dependencies**, then add `NoxySDK` to your target’s **Frameworks and Libraries**.
+
+Once the package is resolved and linked, `import NoxySDK` will work.
+
 ---
 
 ## Quick Start
@@ -53,7 +142,7 @@ import NoxySDK
 
 // 1. Create identity with wallet signer
 let identity = NoxyIdentity.eoa(NoxyEoaWalletIdentity(
-    address: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1",
+    address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     signer: { data in
         let sig = try await wallet.signMessage(data)
         return Signature(bytes: sig)

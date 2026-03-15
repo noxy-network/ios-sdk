@@ -8,8 +8,8 @@ public struct NoxyNetworkOptions {
     public let maxRetries: Int
     public let retryTimeoutMs: UInt64
     public let requireAck: Bool
-    /// Skips TLS certificate verification. Use only in development; never enable in production.
-    public let insecureSkipTLSVerification: Bool
+    /// Optional APNs token (hex string). When provided, app works online and offline (wake-up pushes). When omitted, online only.
+    public let apnToken: String?
 
     public init(
         appId: String,
@@ -17,13 +17,13 @@ public struct NoxyNetworkOptions {
         maxRetries: Int = 5,
         retryTimeoutMs: UInt64 = 15_000,
         requireAck: Bool = false,
-        insecureSkipTLSVerification: Bool = false
+        apnToken: String? = nil
     ) {
         self.appId = appId
         self.relayUrl = relayUrl
         self.maxRetries = maxRetries
         self.retryTimeoutMs = retryTimeoutMs
         self.requireAck = requireAck
-        self.insecureSkipTLSVerification = insecureSkipTLSVerification
+        self.apnToken = apnToken
     }
 }
