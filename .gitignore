@@ -6,3 +6,4 @@ DerivedData/
 .env
 .env.*
 *.log
+Examples/
