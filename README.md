@@ -104,6 +104,13 @@ The handler receives a decrypted `[String: Any]` (JSON object). Common fields: `
 
 ---
 
+### Wake-up and Background Behavior
+
+- **Works when:** App is suspended, backgrounded, or device is locked. Network is allowed during the remote-notification fetch (up to ~30 seconds).
+- **Requires:** `remote-notification` in `UIBackgroundModes` (Info.plist) and `handleWakeUpNotification` called from `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`.
+
+---
+
 ## Installation
 
 Add to your `Package.swift`:
@@ -128,7 +135,6 @@ dependencies: [
 ### Build requirements
 
 - **Xcode 15+** or **Swift 5.9+**
-- **Remote install:** The repo must be tagged (e.g. `1.0.1`) for the URL to resolve.
 - **Xcode app projects:** Add the package via **File → Add Package Dependencies**, then add `NoxySDK` to your target’s **Frameworks and Libraries**.
 
 Once the package is resolved and linked, `import NoxySDK` will work.

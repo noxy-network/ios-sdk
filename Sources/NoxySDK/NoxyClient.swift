@@ -154,39 +154,50 @@ public final class NoxyClient {
             var result: NoxyWakeUpResult = .noData
             defer { completion(result) }
 
-            // Disconnect quickly to allow fast reconnect (relay expects new connection soon)
-            await networkModule.disconnectForReconnect()
+            // Only disconnect if we have a live connection (avoids no-op when app was terminated)
+            if networkModule.isConnected {
+                await networkModule.disconnectForReconnect()
+            }
             guard let device = try? await deviceModule.load(identityId: identity.address, appId: networkOptions.appId),
                   !device.isRevoked else {
                 return
             }
             guard let _ = try? await deviceModule.loadDevicePrivateKeys() else { return }
 
-            do {
-                // 1. Establish live gRPC connection (reconnect)
-                try await networkModule.connect()
-                // 2. Authenticate device again to establish session
-                _ = try await networkModule.authenticateDevice(device)
-                // 3. Subscribe for notifications over the live connection
-                try await networkModule.subscribeToNotifications(
-                    handler: { [weak self] envelope in
-                        guard let self else { return }
-                        Task {
-                            do {
-                                if let decrypted = try await self.notificationModule.decryptNotification(envelope) {
-                                    result = .newData
-                                    let payload = decrypted
-                                    let handler = self.notificationHandler
-                                    DispatchQueue.main.async { handler?(payload) }
-                                }
-                            } catch { /* ignore */ }
-                        }
-                    },
-                    apnToken: effectiveApnToken
-                )
-            } catch {
-                result = .failed
-                return
+            let maxAttempts = 3
+            for attempt in 1...maxAttempts {
+                do {
+                    // 1. Establish live gRPC connection (reconnect)
+                    try await networkModule.connect()
+                    // 2. Authenticate device again to establish session
+                    _ = try await networkModule.authenticateDevice(device)
+                    // 3. Subscribe for notifications over the live connection
+                    try await networkModule.subscribeToNotifications(
+                        handler: { [weak self] envelope in
+                            guard let self else { return }
+                            Task {
+                                do {
+                                    if let decrypted = try await self.notificationModule.decryptNotification(envelope) {
+                                        result = .newData
+                                        let payload = decrypted
+                                        let handler = self.notificationHandler
+                                        DispatchQueue.main.async { handler?(payload) }
+                                    }
+                                } catch { /* ignore */ }
+                            }
+                        },
+                        apnToken: effectiveApnToken
+                    )
+                    break
+                } catch {
+                    if attempt < maxAttempts {
+                        await networkModule.disconnectForReconnect()
+                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s before retry
+                    } else {
+                        result = .failed
+                        return
+                    }
+                }
             }
 
             try? await Task.sleep(nanoseconds: 20_000_000_000) // 20s to receive pushes
