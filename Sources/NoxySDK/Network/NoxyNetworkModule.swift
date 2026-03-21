@@ -18,6 +18,7 @@ public final class NoxyNetworkModule: @unchecked Sendable {
     private var pendingRequests: [String: CheckedContinuation<Noxy_Device_DeviceResponse, Error>] = [:]
     private var pushHandler: ((NoxyEncryptedNotification) async -> Void)?
     private let lock = NSLock()
+    private let connectionLock = NSLock()
 
     public init(options: NoxyNetworkOptions) {
         self.options = options
@@ -44,8 +45,12 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         return (host, port)
     }
 
-    /// Connect to relay via gRPC (always TLS)
+    /// Connect to relay via gRPC (always TLS).
+    /// Waits for any in-progress disconnect to finish before connecting (avoids race conditions).
     public func connect() async throws {
+        connectionLock.lock()
+        defer { connectionLock.unlock() }
+
         let (host, port) = try parseRelayURL(options.relayUrl)
         let group = PlatformSupport.makeEventLoopGroup(loopCount: 1)
         let tlsConfig = GRPCTLSConfiguration.makeClientDefault(compatibleWith: group)
@@ -151,6 +156,19 @@ public final class NoxyNetworkModule: @unchecked Sendable {
 
     /// Disconnect from relay
     public func disconnect() async {
+        connectionLock.lock()
+        defer { connectionLock.unlock() }
+        await performDisconnect()
+    }
+
+    /// Quick disconnect for wake-up reconnect; prioritizes speed over graceful shutdown.
+    public func disconnectForReconnect() async {
+        connectionLock.lock()
+        defer { connectionLock.unlock() }
+        await performDisconnect()
+    }
+
+    private func performDisconnect() async {
         lock.lock()
         for (_, cont) in pendingRequests {
             cont.resume(throwing: NoxyError.general("Disconnected"))
@@ -161,14 +179,15 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         responseTask?.cancel()
         streamCall?.requestStream.finish()
         streamCall = nil
-        try? channel?.close().wait()
+        let ch = channel
         channel = nil
-        try? eventLoopGroup?.syncShutdownGracefully()
-        eventLoopGroup = nil
-
         setSessionId(nil)
         setNetworkDeviceId(nil)
         pushHandler = nil
+
+        try? ch?.close().wait()
+        try? eventLoopGroup?.syncShutdownGracefully()
+        eventLoopGroup = nil
     }
 
     /// Authenticate device with relay.

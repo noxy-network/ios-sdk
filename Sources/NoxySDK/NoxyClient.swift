@@ -154,7 +154,8 @@ public final class NoxyClient {
             var result: NoxyWakeUpResult = .noData
             defer { completion(result) }
 
-            await networkModule.disconnect()
+            // Disconnect quickly to allow fast reconnect (relay expects new connection soon)
+            await networkModule.disconnectForReconnect()
             guard let device = try? await deviceModule.load(identityId: identity.address, appId: networkOptions.appId),
                   !device.isRevoked else {
                 return
@@ -162,8 +163,11 @@ public final class NoxyClient {
             guard let _ = try? await deviceModule.loadDevicePrivateKeys() else { return }
 
             do {
+                // 1. Establish live gRPC connection (reconnect)
                 try await networkModule.connect()
+                // 2. Authenticate device again to establish session
                 _ = try await networkModule.authenticateDevice(device)
+                // 3. Subscribe for notifications over the live connection
                 try await networkModule.subscribeToNotifications(
                     handler: { [weak self] envelope in
                         guard let self else { return }

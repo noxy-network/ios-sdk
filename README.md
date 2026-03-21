@@ -110,7 +110,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/noxy-network/ios-sdk.git", from: "1.0.0"),
+    .package(url: "https://github.com/noxy-network/ios-sdk.git", from: "1.0.1"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: ["NoxySDK"]),
@@ -128,7 +128,7 @@ dependencies: [
 ### Build requirements
 
 - **Xcode 15+** or **Swift 5.9+**
-- **Remote install:** The repo must be tagged (e.g. `1.0.0`) for the URL to resolve.
+- **Remote install:** The repo must be tagged (e.g. `1.0.1`) for the URL to resolve.
 - **Xcode app projects:** Add the package via **File → Add Package Dependencies**, then add `NoxySDK` to your target’s **Frameworks and Libraries**.
 
 Once the package is resolved and linked, `import NoxySDK` will work.
