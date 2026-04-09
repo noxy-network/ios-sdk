@@ -4,16 +4,17 @@ private extension Data {
     var hexString: String { map { String(format: "%02x", $0) }.joined() }
 }
 
-/// Main Noxy client. Lightweight orchestrator: no state machine, no DI.
+/// Main Noxy client for the [Noxy Decision Layer](https://noxy.network): wallet identity, relay connection,
+/// encrypted decision requests, and outcomes (approve/reject).
 public final class NoxyClient {
     private let identity: NoxyIdentity
     private let networkOptions: NoxyNetworkOptions
     private let deviceModule: NoxyDeviceModule
     private let networkModule: NoxyNetworkModule
-    private let notificationModule: NoxyNotificationModule
+    private let decisionCryptoModule: NoxyDecisionCryptoModule
 
     private var apnsToken: Data?
-    private var notificationHandler: (([String: Any]) -> Void)?
+    private var decisionHandler: ((_ messageId: String?, _ decision: [String: Any]) -> Void)?
 
     public init(
         identity: NoxyIdentity,
@@ -24,7 +25,7 @@ public final class NoxyClient {
         self.networkOptions = network
         self.deviceModule = NoxyDeviceModule(storage: storage)
         self.networkModule = NoxyNetworkModule(options: network)
-        self.notificationModule = NoxyNotificationModule(deviceModule: self.deviceModule)
+        self.decisionCryptoModule = NoxyDecisionCryptoModule(deviceModule: self.deviceModule)
     }
 
     public var address: WalletAddress { identity.address }
@@ -32,16 +33,14 @@ public final class NoxyClient {
     public var isRelayConnected: Bool { networkModule.isConnected }
     public var isNetworkReady: Bool { networkModule.isReady }
 
-    /// Effective APNs token: from setApnsToken(Data) as hex, or from NoxyNetworkOptions.apnToken.
-    /// When set, enables offline wake-up pushes; when nil, online-only.
+    /// Effective APNs token: from `setApnsToken(_:)` as hex, or from `NoxyNetworkOptions.apnToken`.
+    /// When set, enables offline wake-up; when nil, online-only.
     private var effectiveApnToken: String? {
         if let data = apnsToken, !data.isEmpty { return data.hexString }
         return networkOptions.apnToken
     }
 
     /// Initialize: load or create device, connect to network, authenticate.
-    /// Only registers (announces) the device on the relay when the authenticate response
-    /// contains requires_registration: true (e.g. relay does not know the device).
     public func initialize() async throws {
         try await networkModule.connect()
 
@@ -85,11 +84,11 @@ public final class NoxyClient {
     /// Rotate device keys locally and on relay
     public func rotateKeys() async throws {
         guard let sig = try await deviceModule.getDeviceSignature() else {
-            throw NoxyError.general("Unable to rotate device keys")
+            throw NoxyError.general("Unable to rotate keys")
         }
         try await deviceModule.rotateKeys()
         guard let pk = deviceModule.publicKey, let pqPk = deviceModule.pqPublicKey else {
-            throw NoxyError.general("Unable to rotate device keys")
+            throw NoxyError.general("Unable to rotate keys")
         }
         try await networkModule.rotateDeviceKeys(
             newPubkeys: (pk, pqPk),
@@ -98,42 +97,90 @@ public final class NoxyClient {
         )
     }
 
-    /// Register APNs device token for silent wake-up pushes when app is backgrounded.
-    /// Call when `application(_:didRegisterForRemoteNotificationsWithDeviceToken:)` fires.
+    /// Register APNs device token for silent wake-up when the app is backgrounded.
     public func setApnsToken(_ token: Data) {
         apnsToken = token
     }
 
-    /// Subscribe to notifications. Loads device private keys first.
-    public func on(handler: @escaping ([String: Any]) -> Void) async throws {
-        notificationHandler = handler
+    /// Subscribe to encrypted decision requests from the relay.
+    /// - Parameters:
+    ///   - handler: Called with `(messageId, decision)` where `messageId` is the relay stream id (use for outcomes when JSON has no `decision_id`), and `decision` is the decrypted JSON payload.
+    /// After each successful decrypt, a delivery ``sendDecisionAck`` is sent when a decision id is known (payload or relay `message_id`).
+    public func on(handler: @escaping (_ messageId: String?, _ decision: [String: Any]) -> Void) async throws {
+        decisionHandler = handler
         _ = try await deviceModule.loadDevicePrivateKeys()
-        try await networkModule.subscribeToNotifications(
-            handler: { [weak self] envelope in
+        try await networkModule.subscribeToDecisions(
+            handler: { [weak self] envelope, relayMessageId in
                 guard let self else { return }
-                do {
-                    if let decrypted = try await self.notificationModule.decryptNotification(envelope) {
-                        handler(decrypted)
-                    }
-                } catch {
-                    // Decryption failed; silently ignored
-                }
+                await self.deliverDecision(envelope: envelope, relayMessageId: relayMessageId, notifyUser: handler)
             },
             apnToken: effectiveApnToken
         )
     }
 
-    /// Check if userInfo is a Noxy wake-up (relay sends `{"aps": {"content-available": 1}}`).
+    private func deliverDecision(
+        envelope: NoxyEncryptedDecision,
+        relayMessageId: String?,
+        notifyUser: ((_ messageId: String?, _ decision: [String: Any]) -> Void)?
+    ) async {
+        do {
+            guard let decrypted = try await decisionCryptoModule.decryptDecision(envelope) else {
+                #if DEBUG
+                print("[NoxySDK][Client] decryptDecision returned nil (cannot decrypt for this device / bad envelope)")
+                #endif
+                return
+            }
+            #if DEBUG
+            let keys = decrypted.keys.sorted().joined(separator: ", ")
+            print("[NoxySDK][Client] decision decrypted message_id=\(relayMessageId ?? "nil") keys=[\(keys)]")
+            #endif
+            // Deliver to the app first. Do not await sendDecisionAck here: it uses sendAndWait on the same
+            // bidirectional stream whose responses are only consumed by processResponseStream. While this
+            // handler runs, that loop cannot read the ACK response — deadlock (and Approve/Reject hang).
+            notifyUser?(relayMessageId, decrypted)
+            if let ackId = Self.deliveryAckDecisionId(from: decrypted, relayMessageId: relayMessageId) {
+                Task { [weak self] in
+                    guard let self else { return }
+                    try? await self.networkModule.sendDecisionAck(decisionId: ackId)
+                }
+            }
+        } catch {
+            #if DEBUG
+            print("[NoxySDK][Client] decryptDecision failed: \(error)")
+            #endif
+        }
+    }
+
+    private static func deliveryAckDecisionId(from payload: [String: Any], relayMessageId: String?) -> String? {
+        if let s = relayMessageId, !s.isEmpty { return s }
+        if let s = payload["decision_id"] as? String, !s.isEmpty { return s }
+        if let s = payload["decisionId"] as? String, !s.isEmpty { return s }
+        if let s = payload["message_id"] as? String, !s.isEmpty { return s }
+        return nil
+    }
+
+    /// Send approve/reject to the relay for a decision (e.g. after the user taps a notification action).
+    public func sendDecisionOutcome(
+        decisionId: String,
+        outcome: NoxyDecisionChoice,
+        receivedAt: UInt64? = nil
+    ) async throws {
+        try await networkModule.sendDecisionOutcome(decisionId: decisionId, outcome: outcome, receivedAt: receivedAt)
+    }
+
+    /// Optional extra delivery ack (normally acks are sent automatically after each decrypted decision).
+    public func sendDecisionAck(decisionId: String, receivedAt: UInt64? = nil) async throws {
+        try await networkModule.sendDecisionAck(decisionId: decisionId, receivedAt: receivedAt)
+    }
+
+    /// Check if `userInfo` is a Noxy wake-up (`aps.content-available: 1`).
     public static func isNoxyWakeUp(userInfo: [AnyHashable: Any]) -> Bool {
         guard let aps = userInfo["aps"] as? [AnyHashable: Any] else { return false }
         let contentAvailable = aps["content-available"]
         return (contentAvailable as? Int == 1) || (contentAvailable as? NSNumber)?.intValue == 1
     }
 
-    /// Handle APNs wake-up: reconnect to relay and fetch notifications.
-    /// Call from `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`.
-    /// If userInfo is provided, only proceeds when it matches relay wake format (`aps.content-available: 1`).
-    /// Requires "Remote notifications" background mode.
+    /// Handle APNs wake-up: reconnect and resume the decision stream.
     public func handleWakeUpNotification(
         userInfo: [AnyHashable: Any]? = nil,
         fetchCompletionHandler completion: @escaping (NoxyWakeUpResult) -> Void
@@ -146,7 +193,7 @@ public final class NoxyClient {
     }
 
     private func performWakeUpFetch(completion: @escaping (NoxyWakeUpResult) -> Void) {
-        guard notificationHandler != nil else {
+        guard decisionHandler != nil else {
             completion(.noData)
             return
         }
@@ -154,7 +201,6 @@ public final class NoxyClient {
             var result: NoxyWakeUpResult = .noData
             defer { completion(result) }
 
-            // Only disconnect if we have a live connection (avoids no-op when app was terminated)
             if networkModule.isConnected {
                 await networkModule.disconnectForReconnect()
             }
@@ -167,23 +213,17 @@ public final class NoxyClient {
             let maxAttempts = 3
             for attempt in 1...maxAttempts {
                 do {
-                    // 1. Establish live gRPC connection (reconnect)
                     try await networkModule.connect()
-                    // 2. Authenticate device again to establish session
                     _ = try await networkModule.authenticateDevice(device)
-                    // 3. Subscribe for notifications over the live connection
-                    try await networkModule.subscribeToNotifications(
-                        handler: { [weak self] envelope in
+                    try await networkModule.subscribeToDecisions(
+                        handler: { [weak self] envelope, relayMessageId in
                             guard let self else { return }
                             Task {
-                                do {
-                                    if let decrypted = try await self.notificationModule.decryptNotification(envelope) {
-                                        result = .newData
-                                        let payload = decrypted
-                                        let handler = self.notificationHandler
-                                        DispatchQueue.main.async { handler?(payload) }
-                                    }
-                                } catch { /* ignore */ }
+                                await self.deliverDecision(envelope: envelope, relayMessageId: relayMessageId) { messageId, decision in
+                                    result = .newData
+                                    let handler = self.decisionHandler
+                                    DispatchQueue.main.async { handler?(messageId, decision) }
+                                }
                             }
                         },
                         apnToken: effectiveApnToken
@@ -192,7 +232,7 @@ public final class NoxyClient {
                 } catch {
                     if attempt < maxAttempts {
                         await networkModule.disconnectForReconnect()
-                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s before retry
+                        try? await Task.sleep(nanoseconds: 500_000_000)
                     } else {
                         result = .failed
                         return
@@ -200,7 +240,7 @@ public final class NoxyClient {
                 }
             }
 
-            try? await Task.sleep(nanoseconds: 20_000_000_000) // 20s to receive pushes
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
         }
     }
 
@@ -210,7 +250,7 @@ public final class NoxyClient {
     }
 }
 
-/// Result for APNs wake-up fetch. Map to `UIBackgroundFetchResult` when calling the system completion handler.
+/// Result for APNs wake-up fetch. Map to `UIBackgroundFetchResult` for the system completion handler.
 public enum NoxyWakeUpResult {
     case newData
     case noData

@@ -2,9 +2,6 @@ import Foundation
 import GRPC
 import NIO
 import NIOPosix
-#if canImport(NIOSSL)
-import NIOSSL
-#endif
 
 /// Network module: gRPC-based relay communication via bidirectional HandleMessage stream.
 public final class NoxyNetworkModule: @unchecked Sendable {
@@ -16,7 +13,7 @@ public final class NoxyNetworkModule: @unchecked Sendable {
     private var _sessionId: String?
     private var _networkDeviceId: String?
     private var pendingRequests: [String: CheckedContinuation<Noxy_Device_DeviceResponse, Error>] = [:]
-    private var pushHandler: ((NoxyEncryptedNotification) async -> Void)?
+    private var decisionHandler: ((NoxyEncryptedDecision, String?) async -> Void)?
     private let lock = NSLock()
     private let connectionLock = NSLock()
 
@@ -82,14 +79,24 @@ public final class NoxyNetworkModule: @unchecked Sendable {
     private func processResponseStream(_ call: GRPCAsyncBidirectionalStreamingCall<Noxy_Device_DeviceRequest, Noxy_Device_DeviceResponse>) async throws {
         for try await response in call.responseStream {
             switch response.payload {
-            case .pushEvent(let push):
-                let envelope = NoxyEncryptedNotification(
-                    kyberCt: push.kyberCt,
-                    nonce: push.nonce,
-                    ciphertext: push.ciphertext
+            case .decisionEvent(let ev):
+                let envelope = NoxyEncryptedDecision(
+                    kyberCt: ev.kyberCt,
+                    nonce: ev.nonce,
+                    ciphertext: ev.ciphertext
                 )
-                if let handler = pushHandler {
-                    await handler(envelope)
+                let relayMessageId = response.hasMessageID ? response.messageID : nil
+                
+                let mid = relayMessageId ?? "(none)"
+                let rid = response.requestID.isEmpty ? "(none)" : response.requestID
+                print("[NoxySDK][Network] decisionEvent received request_id=\(rid) message_id=\(mid) kyber=\(ev.kyberCt.count)B nonce=\(ev.nonce.count)B ciphertext=\(ev.ciphertext.count)B handler=\(decisionHandler != nil ? "yes" : "no")")
+                
+                if let handler = decisionHandler {
+                    await handler(envelope, relayMessageId)
+                } else {
+                    
+                    print("[NoxySDK][Network] decisionEvent dropped: no subscribe handler yet")
+                   
                 }
             case .authenticate(let auth):
                 if auth.hasDeviceID { setNetworkDeviceId(auth.deviceID) }
@@ -99,8 +106,10 @@ public final class NoxyNetworkModule: @unchecked Sendable {
                 setNetworkDeviceId(reg.deviceID)
                 setSessionId(reg.sessionID)
                 resumePending(requestID: response.requestID, response: response)
-            case .subscribeNotifications, .revokeDevice, .rotateDeviceKeys, .clientAck:
+            case .subscribeDecisions, .revokeDevice, .rotateDeviceKeys, .decisionOutcome, .decisionAck:
                 resumePending(requestID: response.requestID, response: response)
+            case .decisionRouted:
+                break
             case .error(let err):
                 if !response.requestID.isEmpty {
                     resumePending(requestID: response.requestID, error: NoxyError.general("Relay error: \(err.code) \(err.message)"))
@@ -183,7 +192,7 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         channel = nil
         setSessionId(nil)
         setNetworkDeviceId(nil)
-        pushHandler = nil
+        decisionHandler = nil
 
         try? ch?.close().wait()
         try? eventLoopGroup?.syncShutdownGracefully()
@@ -233,7 +242,9 @@ public final class NoxyNetworkModule: @unchecked Sendable {
             reg.walletAddress = walletAddress
             reg.signature = signature
             reg.type = "ios"
-            if let tok = apnToken, !tok.isEmpty { reg.apnToken = tok }
+            if let tok = apnToken, !tok.isEmpty {
+                reg.apnToken = tok
+            }
         })
 
         let resp = try await sendAndWait(req)
@@ -276,15 +287,16 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         _ = try await sendAndWait(req)
     }
 
-    /// Subscribe to notifications stream
-    public func subscribeToNotifications(
-        handler: @escaping (NoxyEncryptedNotification) async -> Void,
+    /// Subscribe to encrypted decision requests from the relay.
+    /// - Parameter handler: Receives each event and optional relay `message_id` from the response (useful for delivery ack).
+    public func subscribeToDecisions(
+        handler: @escaping (NoxyEncryptedDecision, String?) async -> Void,
         apnToken: String? = nil
     ) async throws {
-        pushHandler = handler
+        decisionHandler = handler
 
         var req = Noxy_Device_DeviceRequest()
-        req.payload = .subscribeNotifications(Noxy_Device_SubscribeNotifications.with { sub in
+        req.payload = .subscribeDecisions(Noxy_Device_SubscribeDecisions.with { sub in
             sub.subscribe = true
             if let tok = apnToken, !tok.isEmpty { sub.apnToken = tok }
         })
@@ -293,10 +305,47 @@ public final class NoxyNetworkModule: @unchecked Sendable {
 
         _ = try await sendAndWait(req)
     }
+
+    /// Sends ``DecisionOutcome`` (proto): user's **Approve** or **Reject** after they act in the UI.
+    public func sendDecisionOutcome(
+        decisionId: String,
+        outcome: NoxyDecisionChoice,
+        receivedAt: UInt64? = nil
+    ) async throws {
+        var req = Noxy_Device_DeviceRequest()
+        let protoOutcome: Noxy_Device_DecisionOutcomeValue = outcome == .approve ? .approve : .reject
+        req.payload = .decisionOutcome(Noxy_Device_DecisionOutcome.with { d in
+            d.decisionID = decisionId
+            d.outcome = protoOutcome
+            d.receivedAt = receivedAt ?? UInt64(Date().timeIntervalSince1970 * 1000)
+        })
+        if let deviceId = currentDeviceId { req.deviceID = deviceId }
+        if let sessionId = currentSessionId { req.sessionID = sessionId }
+        _ = try await sendAndWait(req)
+    }
+
+    /// Sends ``DecisionAck`` (proto): relay is notified the device **received** the decision request (decrypt ok).
+    /// For the user's Approve/Reject use ``sendDecisionOutcome(decisionId:outcome:receivedAt:)``.
+    public func sendDecisionAck(decisionId: String, receivedAt: UInt64? = nil) async throws {
+        var req = Noxy_Device_DeviceRequest()
+        req.payload = .decisionAck(Noxy_Device_DecisionAck.with { a in
+            a.decisionID = decisionId
+            a.receivedAt = receivedAt ?? UInt64(Date().timeIntervalSince1970 * 1000)
+        })
+        if let deviceId = currentDeviceId { req.deviceID = deviceId }
+        if let sessionId = currentSessionId { req.sessionID = sessionId }
+        _ = try await sendAndWait(req)
+    }
 }
 
-/// Encrypted notification envelope. Ciphertext = encrypted_data || tag (last 16 bytes are GCM auth tag).
-public struct NoxyEncryptedNotification {
+/// User-visible approve/reject for ``NoxyNetworkModule/sendDecisionOutcome(decisionId:outcome:receivedAt:)``.
+public enum NoxyDecisionChoice: Sendable {
+    case approve
+    case reject
+}
+
+/// Encrypted decision event from the relay. Ciphertext = encrypted_data || tag (last 16 bytes are GCM auth tag).
+public struct NoxyEncryptedDecision {
     public let kyberCt: Data
     public let nonce: Data
     public let ciphertext: Data
@@ -337,3 +386,7 @@ public struct NoxyEncryptedNotification {
         ciphertext.suffix(16)
     }
 }
+
+/// Deprecated alias for ``NoxyEncryptedDecision``.
+@available(*, deprecated, renamed: "NoxyEncryptedDecision")
+public typealias NoxyEncryptedNotification = NoxyEncryptedDecision

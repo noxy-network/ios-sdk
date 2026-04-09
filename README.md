@@ -1,18 +1,20 @@
 # 📦 @noxy-network/ios-sdk
 
-**Noxy** is a decentralized push notification network for Web3 apps. This SDK lets your iOS app receive secure, end-to-end encrypted notifications using **wallet-based identity** — no emails or phone numbers.
+IOS SDK to integrate with the [Noxy](https://noxy.network) **Decision Layer**: subscribe to encrypted decision requests, present them to the user, and respond with decision — all with wallet-based identity.
 
-Users register a device once with a wallet signature. After that, they receive real-time or store-and-forward notifications — **without centralized user accounts**.
+Users register a device once with a wallet signature. The relay streams encrypted decision payloads; the SDK decrypts them locally and can send `DecisionOutcome` back over the same gRPC session.
+
+**Before you integrate:** Create your app at [noxy.network](https://noxy.network). When the app is created, you receive an **app id** and an **app token** (auth token). This iOS SDK uses the **app id** (`appId` in `NoxyNetworkOptions`). The **app token** is for agent/orchestrator SDKs (Go, Rust, Python, Node, etc.), not for this package.
 
 ---
 
 ## Features
 
-- **Wallet-based identity** — EOA and Smart Contract Wallets; no email or phone
-- **End-to-end encrypted notifications** — Kyber (post-quantum) + AES-GCM
-- **One-time device registration** — Sign with wallet; device keys and post-quantum keys generated and stored in Keychain
-- **Relay-based delivery** — gRPC connection to relay; real-time or store-and-forward
-- **Secure storage** — iOS Keychain for device data and private keys (never UserDefaults)
+- **Wallet-based identity** — EOA and Smart Contract Wallets
+- **Encrypted decision events** — Kyber (post-quantum) + AES-GCM for payloads from the Decision Layer
+- **Subscribe / outcomes** — `SubscribeDecisions` on the relay; `sendDecisionOutcome` for approve/reject
+- **Optional APNs wake-up** — Reconnect when the app is backgrounded (`setApnsToken`, `handleWakeUpNotification`)
+- **Secure storage** — iOS Keychain for device data and private keys
 
 ---
 
@@ -44,8 +46,9 @@ func createNoxyClient(
 | `relayUrl` | **Yes** | `String` | — | gRPC endpoint (e.g. `"https://relay.noxy.network"`). |
 | `maxRetries` | No | `Int` | `5` | Max retries for transient failures. |
 | `retryTimeoutMs` | No | `UInt64` | `15_000` | Retry timeout in milliseconds. |
-| `requireAck` | No | `Bool` | `false` | Require acknowledgment for push delivery. |
 | `apnToken` | No | `String?` | `nil` | APNs token for wake-up pushes. When set, app works **online + offline**; when nil, **online only**. |
+
+Delivery acknowledgements (`DecisionAck`) are sent automatically after each successfully decrypted decision when a decision id is available (`decision_id` / `decisionId` / `message_id` in the JSON, or the relay response `message_id`).
 
 ---
 
@@ -78,9 +81,11 @@ func createNoxyClient(
 | Method | Description |
 |--------|-------------|
 | `initialize()` | Load or create device, connect to relay, authenticate |
-| `setApnsToken(_:)` | Register APNs token for wake-up pushes when backgrounded |
-| `on(handler:)` | Subscribe to notifications; handler receives `[String: Any]` |
-| `handleWakeUpNotification(fetchCompletionHandler:)` | Reconnect and fetch when woken by APNs |
+| `setApnsToken(_:)` | Register APNs token for wake-up when backgrounded |
+| `on(handler:)` | Subscribe to encrypted decisions; handler receives `(messageId, decision)` |
+| `sendDecisionOutcome(decisionId:outcome:receivedAt:)` | Send approve/reject to the relay |
+| `sendDecisionAck(decisionId:receivedAt:)` | Delivery ack (not the user’s decision) |
+| `handleWakeUpNotification(fetchCompletionHandler:)` | Reconnect decision stream when woken by APNs |
 | `revokeDevice()` | Revoke device locally and on relay |
 | `rotateKeys()` | Rotate device keys locally and on relay |
 | `close()` | Disconnect from relay |
@@ -98,16 +103,17 @@ func createNoxyClient(
 
 ---
 
-### Notification Payload
+### Decision payload
 
-The handler receives a decrypted `[String: Any]` (JSON object). Common fields: `title`, `body`, `data`.
+`on(handler:)` passes `messageId` (relay stream id, optional) and `decision` (decrypted `[String: Any]` JSON). Use `messageId` for `sendDecisionOutcome` when JSON has no `decision_id` / `decisionId`. Other fields (e.g. `title`, `body`) are app-specific.
 
 ---
 
-### Wake-up and Background Behavior
+### Wake-up and background
 
-- **Works when:** App is suspended, backgrounded, or device is locked. Network is allowed during the remote-notification fetch (up to ~30 seconds).
-- **Requires:** `remote-notification` in `UIBackgroundModes` (Info.plist) and `handleWakeUpNotification` called from `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`.
+- **Works when:** App is suspended, backgrounded, or device is locked (network allowed for the remote-notification fetch, typically up to ~30 seconds).
+- **Does not work when:** User has force-quit the app (iOS will not launch for pushes).
+- **Requires:** `remote-notification` in `UIBackgroundModes` and `handleWakeUpNotification` from `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`.
 
 ---
 
@@ -117,19 +123,11 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/noxy-network/ios-sdk.git", from: "1.0.1"),
+    .package(url: "https://github.com/noxy-network/ios-sdk.git", from: "2.0.0"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: ["NoxySDK"]),
 ]
-```
-
-Or for local development:
-
-```swift
-dependencies: [
-    .package(path: "../ios-sdk"),
-],
 ```
 
 ### Build requirements
@@ -167,19 +165,23 @@ let client = createNoxyClient(
 // 3. Initialize (loads or registers device, connects to relay)
 try await client.initialize()
 
-// 4. Subscribe to notifications
-try await client.on { notification in
-    print("Notification:", notification)
-    // notification is the decrypted payload (e.g. { "title": "...", "body": "...", "data": {...} })
+// 4. Subscribe to decision requests from the relay
+try await client.on { messageId, decision in
+    print("messageId:", messageId as Any, "decision:", decision)
+    // Show UI, use UNMutableNotificationContent
+    // e.g. decision_id, title, body — use sendDecisionOutcome when the user approves/rejects
 }
 
-// 5. Disconnect when done
+// 5. after user taps Approve/Reject in your UI:
+try await client.sendDecisionOutcome(decisionId: "...", outcome: .approve)
+
+// 6. Disconnect when done
 await client.close()
 ```
 
 ---
 
-## Usage Examples
+## Usage
 
 ### EOA Identity (Externally Owned Account)
 
@@ -226,33 +228,17 @@ let client = createNoxyClient(
 )
 ```
 
-### Displaying Notifications
+### Actionable notifications (Approve / Reject)
 
-Request notification permission and show decrypted notifications as local alerts:
+Register a `UNNotificationCategory` with two `UNNotificationAction`s, set `content.categoryIdentifier`, and schedule a local notification from `on(handler:)`. In `userNotificationCenter(_:didReceive:withCompletionHandler:)`, read `decision_id` from `userInfo` and call `sendDecisionOutcome`.
 
 ```swift
 import UserNotifications
 
-// Request permission before initialize
-let granted = try await UNUserNotificationCenter.current()
-    .requestAuthorization(options: [.alert, .sound, .badge])
-
-if granted {
-    try await client.initialize()
-    try await client.on { payload in
-        let content = UNMutableNotificationContent()
-        content.title = payload["title"] as? String ?? "Notification"
-        content.body = payload["body"] as? String ?? "New notification"
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
-    }
-}
+let approved = UNNotificationAction(identifier: "APPROVE", title: "Approve", options: [.foreground])
+let rejected = UNNotificationAction(identifier: "REJECT", title: "Reject", options: [.foreground])
+let category = UNNotificationCategory(identifier: "DECISION", actions: [approved, rejected], intentIdentifiers: [], options: [])
+UNUserNotificationCenter.current().setNotificationCategories([category])
 ```
 
 ### Revoke or Rotate Device
@@ -267,35 +253,42 @@ try await client.rotateKeys()
 
 ---
 
-## Security Model
+## Security model
 
 - **Device registration** — Device signs once with the wallet; the signature binds the device to the identity.
-- **Notification encryption** — Kyber KEM for key agreement, HKDF for key derivation, AES-GCM for payload encryption.
-- **Relay** — Sees only encrypted payloads; no plaintext and no need for centralized user accounts.
+- **Decision encryption** — Kyber KEM, HKDF, AES-GCM for decision payloads from the relay.
+- **Relay** — Sees ciphertext on the wire; plaintext is handled only on-device after decryption.
 
 ---
 
-## API Overview
+## API overview
 
 | Method | Description |
 |--------|-------------|
 | `initialize()` | Load or create device, connect to relay, authenticate |
-| `on(handler:)` | Subscribe to notifications; handler receives decrypted payload |
+| `on(handler:)` | Subscribe to decisions; handler receives `(messageId, decision)` |
+| `sendDecisionOutcome(decisionId:outcome:)` | Send approve/reject |
 | `revokeDevice()` | Revoke device locally and on relay |
 | `rotateKeys()` | Rotate device keys locally and on relay |
 | `close()` | Disconnect from relay |
 
 ---
 
-## Proto & gRPC
+## Example app
 
-The network layer uses gRPC with generated client from `proto/noxy.device.proto`. To regenerate after proto changes:
+The only bundled sample is **`Examples/NoxyExampleApp/`**: open **`NoxyExampleApp.xcodeproj`** and follow **`Examples/NoxyExampleApp/README.md`**.
+
+---
+
+## Proto & code generation
+
+The network layer uses gRPC with types from `proto/noxy.device.proto`. Regenerate **`noxy.device.pb.swift`** after proto changes:
 
 ```bash
 ./scripts/generate.sh
 ```
 
-Requires `protoc`, `protoc-gen-swift` (swift-protobuf), and `protoc-gen-grpc-swift` (grpc-swift).
+Requires `protoc` and `protoc-gen-swift` (e.g. `brew install swift-protobuf`). The `noxy.device.grpc.swift` stub is kept for **grpc-swift 1.x**; update it only if the RPC surface changes.
 
 ---
 

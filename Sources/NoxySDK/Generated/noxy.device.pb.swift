@@ -8,7 +8,11 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -19,6 +23,40 @@ import SwiftProtobuf
 fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
   struct _2: SwiftProtobuf.ProtobufAPIVersion_2 {}
   typealias Version = _2
+}
+
+enum Noxy_Device_DecisionOutcomeValue: SwiftProtobuf.Enum, Swift.CaseIterable {
+  typealias RawValue = Int
+  case approve // = 0
+  case reject // = 1
+  case UNRECOGNIZED(Int)
+
+  init() {
+    self = .approve
+  }
+
+  init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .approve
+    case 1: self = .reject
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  var rawValue: Int {
+    switch self {
+    case .approve: return 0
+    case .reject: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  static let allCases: [Noxy_Device_DecisionOutcomeValue] = [
+    .approve,
+    .reject,
+  ]
+
 }
 
 enum Noxy_Device_ResponseStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
@@ -175,12 +213,12 @@ struct Noxy_Device_DeviceRequest: Sendable {
     set {payload = .registerDevice(newValue)}
   }
 
-  var subscribeNotifications: Noxy_Device_SubscribeNotifications {
+  var subscribeDecisions: Noxy_Device_SubscribeDecisions {
     get {
-      if case .subscribeNotifications(let v)? = payload {return v}
-      return Noxy_Device_SubscribeNotifications()
+      if case .subscribeDecisions(let v)? = payload {return v}
+      return Noxy_Device_SubscribeDecisions()
     }
-    set {payload = .subscribeNotifications(newValue)}
+    set {payload = .subscribeDecisions(newValue)}
   }
 
   var revokeDevice: Noxy_Device_RevokeDevice {
@@ -199,12 +237,21 @@ struct Noxy_Device_DeviceRequest: Sendable {
     set {payload = .rotateDeviceKeys(newValue)}
   }
 
-  var clientAck: Noxy_Device_ClientAck {
+  var decisionOutcome: Noxy_Device_DecisionOutcome {
     get {
-      if case .clientAck(let v)? = payload {return v}
-      return Noxy_Device_ClientAck()
+      if case .decisionOutcome(let v)? = payload {return v}
+      return Noxy_Device_DecisionOutcome()
     }
-    set {payload = .clientAck(newValue)}
+    set {payload = .decisionOutcome(newValue)}
+  }
+
+  /// delivery (not decision) ack
+  var decisionAck: Noxy_Device_DecisionAck {
+    get {
+      if case .decisionAck(let v)? = payload {return v}
+      return Noxy_Device_DecisionAck()
+    }
+    set {payload = .decisionAck(newValue)}
   }
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -212,10 +259,12 @@ struct Noxy_Device_DeviceRequest: Sendable {
   enum OneOf_Payload: Equatable, Sendable {
     case authenticate(Noxy_Device_Authenticate)
     case registerDevice(Noxy_Device_RegisterDevice)
-    case subscribeNotifications(Noxy_Device_SubscribeNotifications)
+    case subscribeDecisions(Noxy_Device_SubscribeDecisions)
     case revokeDevice(Noxy_Device_RevokeDevice)
     case rotateDeviceKeys(Noxy_Device_RotateDeviceKeys)
-    case clientAck(Noxy_Device_ClientAck)
+    case decisionOutcome(Noxy_Device_DecisionOutcome)
+    /// delivery (not decision) ack
+    case decisionAck(Noxy_Device_DecisionAck)
 
   }
 
@@ -223,6 +272,20 @@ struct Noxy_Device_DeviceRequest: Sendable {
 
   fileprivate var _deviceID: String? = nil
   fileprivate var _sessionID: String? = nil
+}
+
+struct Noxy_Device_DecisionAck: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var decisionID: String = String()
+
+  var receivedAt: UInt64 = 0
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
 }
 
 struct Noxy_Device_Authenticate: Sendable {
@@ -264,10 +327,27 @@ struct Noxy_Device_RegisterDevice: Sendable {
 
   var signature: Data = Data()
 
-  var apnToken: String = String()
+  /// Apple APNs token for waking iOS when offline
+  var apnToken: String {
+    get {_apnToken ?? String()}
+    set {_apnToken = newValue}
+  }
+  /// Returns true if `apnToken` has been explicitly set.
+  var hasApnToken: Bool {self._apnToken != nil}
+  /// Clears the value of `apnToken`. Subsequent reads from it will return its default value.
+  mutating func clearApnToken() {self._apnToken = nil}
 
-  var fcmToken: String = String()
+  /// Google FCM token for waking Android when offline
+  var fcmToken: String {
+    get {_fcmToken ?? String()}
+    set {_fcmToken = newValue}
+  }
+  /// Returns true if `fcmToken` has been explicitly set.
+  var hasFcmToken: Bool {self._fcmToken != nil}
+  /// Clears the value of `fcmToken`. Subsequent reads from it will return its default value.
+  mutating func clearFcmToken() {self._fcmToken = nil}
 
+  /// required: browser, desktop, ios, android, telegram
   var type: String = String()
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -275,6 +355,8 @@ struct Noxy_Device_RegisterDevice: Sendable {
   init() {}
 
   fileprivate var _devicePubkeys: Noxy_Device_DevicePublicKeys? = nil
+  fileprivate var _apnToken: String? = nil
+  fileprivate var _fcmToken: String? = nil
 }
 
 struct Noxy_Device_DevicePublicKeys: Sendable {
@@ -291,7 +373,7 @@ struct Noxy_Device_DevicePublicKeys: Sendable {
   init() {}
 }
 
-struct Noxy_Device_SubscribeNotifications: Sendable {
+struct Noxy_Device_SubscribeDecisions: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -306,15 +388,33 @@ struct Noxy_Device_SubscribeNotifications: Sendable {
   /// Clears the value of `subscribe`. Subsequent reads from it will return its default value.
   mutating func clearSubscribe() {self._subscribe = nil}
 
-  var apnToken: String = String()
+  /// Update Apple APNs token (e.g. when rotated)
+  var apnToken: String {
+    get {_apnToken ?? String()}
+    set {_apnToken = newValue}
+  }
+  /// Returns true if `apnToken` has been explicitly set.
+  var hasApnToken: Bool {self._apnToken != nil}
+  /// Clears the value of `apnToken`. Subsequent reads from it will return its default value.
+  mutating func clearApnToken() {self._apnToken = nil}
 
-  var fcmToken: String = String()
+  /// Update FCM token (e.g. when rotated)
+  var fcmToken: String {
+    get {_fcmToken ?? String()}
+    set {_fcmToken = newValue}
+  }
+  /// Returns true if `fcmToken` has been explicitly set.
+  var hasFcmToken: Bool {self._fcmToken != nil}
+  /// Clears the value of `fcmToken`. Subsequent reads from it will return its default value.
+  mutating func clearFcmToken() {self._fcmToken = nil}
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
   fileprivate var _subscribe: Bool? = nil
+  fileprivate var _apnToken: String? = nil
+  fileprivate var _fcmToken: String? = nil
 }
 
 struct Noxy_Device_RevokeDevice: Sendable {
@@ -356,12 +456,14 @@ struct Noxy_Device_RotateDeviceKeys: Sendable {
   fileprivate var _newPubkeys: Noxy_Device_DevicePublicKeys? = nil
 }
 
-struct Noxy_Device_ClientAck: Sendable {
+struct Noxy_Device_DecisionOutcome: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var messageID: String = String()
+  var decisionID: String = String()
+
+  var outcome: Noxy_Device_DecisionOutcomeValue = .approve
 
   var receivedAt: UInt64 = 0
 
@@ -408,12 +510,12 @@ struct Noxy_Device_DeviceResponse: Sendable {
     set {payload = .registerDevice(newValue)}
   }
 
-  var subscribeNotifications: Noxy_Device_SubscribeNotificationsResponse {
+  var subscribeDecisions: Noxy_Device_SubscribeDecisionsResponse {
     get {
-      if case .subscribeNotifications(let v)? = payload {return v}
-      return Noxy_Device_SubscribeNotificationsResponse()
+      if case .subscribeDecisions(let v)? = payload {return v}
+      return Noxy_Device_SubscribeDecisionsResponse()
     }
-    set {payload = .subscribeNotifications(newValue)}
+    set {payload = .subscribeDecisions(newValue)}
   }
 
   var revokeDevice: Noxy_Device_RevokeDeviceResponse {
@@ -432,20 +534,28 @@ struct Noxy_Device_DeviceResponse: Sendable {
     set {payload = .rotateDeviceKeys(newValue)}
   }
 
-  var clientAck: Noxy_Device_ClientAckResponse {
+  var decisionOutcome: Noxy_Device_DecisionOutcomeResponse {
     get {
-      if case .clientAck(let v)? = payload {return v}
-      return Noxy_Device_ClientAckResponse()
+      if case .decisionOutcome(let v)? = payload {return v}
+      return Noxy_Device_DecisionOutcomeResponse()
     }
-    set {payload = .clientAck(newValue)}
+    set {payload = .decisionOutcome(newValue)}
   }
 
-  var pushEvent: Noxy_Device_PushEvent {
+  var decisionEvent: Noxy_Device_DecisionEvent {
     get {
-      if case .pushEvent(let v)? = payload {return v}
-      return Noxy_Device_PushEvent()
+      if case .decisionEvent(let v)? = payload {return v}
+      return Noxy_Device_DecisionEvent()
     }
-    set {payload = .pushEvent(newValue)}
+    set {payload = .decisionEvent(newValue)}
+  }
+
+  var decisionRouted: Noxy_Device_DecisionRoutedResponse {
+    get {
+      if case .decisionRouted(let v)? = payload {return v}
+      return Noxy_Device_DecisionRoutedResponse()
+    }
+    set {payload = .decisionRouted(newValue)}
   }
 
   var error: Noxy_Device_ErrorResponse {
@@ -456,17 +566,27 @@ struct Noxy_Device_DeviceResponse: Sendable {
     set {payload = .error(newValue)}
   }
 
+  var decisionAck: Noxy_Device_DecisionAckResponse {
+    get {
+      if case .decisionAck(let v)? = payload {return v}
+      return Noxy_Device_DecisionAckResponse()
+    }
+    set {payload = .decisionAck(newValue)}
+  }
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   enum OneOf_Payload: Equatable, Sendable {
     case authenticate(Noxy_Device_AuthenticateResponse)
     case registerDevice(Noxy_Device_RegisterDeviceResponse)
-    case subscribeNotifications(Noxy_Device_SubscribeNotificationsResponse)
+    case subscribeDecisions(Noxy_Device_SubscribeDecisionsResponse)
     case revokeDevice(Noxy_Device_RevokeDeviceResponse)
     case rotateDeviceKeys(Noxy_Device_RotateDeviceKeysResponse)
-    case clientAck(Noxy_Device_ClientAckResponse)
-    case pushEvent(Noxy_Device_PushEvent)
+    case decisionOutcome(Noxy_Device_DecisionOutcomeResponse)
+    case decisionEvent(Noxy_Device_DecisionEvent)
+    case decisionRouted(Noxy_Device_DecisionRoutedResponse)
     case error(Noxy_Device_ErrorResponse)
+    case decisionAck(Noxy_Device_DecisionAckResponse)
 
   }
 
@@ -475,7 +595,19 @@ struct Noxy_Device_DeviceResponse: Sendable {
   fileprivate var _messageID: String? = nil
 }
 
-struct Noxy_Device_PushEvent: Sendable {
+struct Noxy_Device_DecisionAckResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var decisionID: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+struct Noxy_Device_DecisionEvent: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -540,7 +672,7 @@ struct Noxy_Device_RegisterDeviceResponse: Sendable {
   init() {}
 }
 
-struct Noxy_Device_SubscribeNotificationsResponse: Sendable {
+struct Noxy_Device_SubscribeDecisionsResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -576,12 +708,26 @@ struct Noxy_Device_RotateDeviceKeysResponse: Sendable {
   init() {}
 }
 
-struct Noxy_Device_ClientAckResponse: Sendable {
+struct Noxy_Device_DecisionOutcomeResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var ackedMessageID: String = String()
+  var decisionID: String = String()
+
+  var outcome: Noxy_Device_DecisionOutcomeValue = .approve
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+struct Noxy_Device_DecisionRoutedResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var decisionID: String = String()
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -608,6 +754,10 @@ struct Noxy_Device_ErrorResponse: Sendable {
 
 fileprivate let _protobuf_package = "noxy.device"
 
+extension Noxy_Device_DecisionOutcomeValue: SwiftProtobuf._ProtoNameProviding {
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0APPROVE\0\u{1}REJECT\0")
+}
+
 extension Noxy_Device_ResponseStatus: SwiftProtobuf._ProtoNameProviding {
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0OK\0\u{1}ERROR\0")
 }
@@ -618,7 +768,7 @@ extension Noxy_Device_ErrorCode: SwiftProtobuf._ProtoNameProviding {
 
 extension Noxy_Device_DeviceRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".DeviceRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}app_id\0\u{3}device_id\0\u{1}timestamp\0\u{1}nonce\0\u{3}session_id\0\u{1}authenticate\0\u{3}register_device\0\u{3}subscribe_notifications\0\u{3}revoke_device\0\u{3}rotate_device_keys\0\u{3}client_ack\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}app_id\0\u{3}device_id\0\u{1}timestamp\0\u{1}nonce\0\u{3}session_id\0\u{1}authenticate\0\u{3}register_device\0\u{3}subscribe_decisions\0\u{3}revoke_device\0\u{3}rotate_device_keys\0\u{3}decision_outcome\0\u{3}decision_ack\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -659,16 +809,16 @@ extension Noxy_Device_DeviceRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
         }
       }()
       case 9: try {
-        var v: Noxy_Device_SubscribeNotifications?
+        var v: Noxy_Device_SubscribeDecisions?
         var hadOneofValue = false
         if let current = self.payload {
           hadOneofValue = true
-          if case .subscribeNotifications(let m) = current {v = m}
+          if case .subscribeDecisions(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.payload = .subscribeNotifications(v)
+          self.payload = .subscribeDecisions(v)
         }
       }()
       case 10: try {
@@ -698,16 +848,29 @@ extension Noxy_Device_DeviceRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
         }
       }()
       case 12: try {
-        var v: Noxy_Device_ClientAck?
+        var v: Noxy_Device_DecisionOutcome?
         var hadOneofValue = false
         if let current = self.payload {
           hadOneofValue = true
-          if case .clientAck(let m) = current {v = m}
+          if case .decisionOutcome(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.payload = .clientAck(v)
+          self.payload = .decisionOutcome(v)
+        }
+      }()
+      case 13: try {
+        var v: Noxy_Device_DecisionAck?
+        var hadOneofValue = false
+        if let current = self.payload {
+          hadOneofValue = true
+          if case .decisionAck(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.payload = .decisionAck(v)
         }
       }()
       default: break
@@ -747,8 +910,8 @@ extension Noxy_Device_DeviceRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
       guard case .registerDevice(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     }()
-    case .subscribeNotifications?: try {
-      guard case .subscribeNotifications(let v)? = self.payload else { preconditionFailure() }
+    case .subscribeDecisions?: try {
+      guard case .subscribeDecisions(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     }()
     case .revokeDevice?: try {
@@ -759,9 +922,13 @@ extension Noxy_Device_DeviceRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
       guard case .rotateDeviceKeys(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
     }()
-    case .clientAck?: try {
-      guard case .clientAck(let v)? = self.payload else { preconditionFailure() }
+    case .decisionOutcome?: try {
+      guard case .decisionOutcome(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+    }()
+    case .decisionAck?: try {
+      guard case .decisionAck(let v)? = self.payload else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
     }()
     case nil: break
     }
@@ -776,6 +943,41 @@ extension Noxy_Device_DeviceRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if lhs.nonce != rhs.nonce {return false}
     if lhs._sessionID != rhs._sessionID {return false}
     if lhs.payload != rhs.payload {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Noxy_Device_DecisionAck: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".DecisionAck"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}decision_id\0\u{3}received_at\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
+      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.receivedAt) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.decisionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 1)
+    }
+    if self.receivedAt != 0 {
+      try visitor.visitSingularUInt64Field(value: self.receivedAt, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Noxy_Device_DecisionAck, rhs: Noxy_Device_DecisionAck) -> Bool {
+    if lhs.decisionID != rhs.decisionID {return false}
+    if lhs.receivedAt != rhs.receivedAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -817,16 +1019,19 @@ extension Noxy_Device_Authenticate: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".RegisterDevice"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_pubkeys\0\u{3}wallet_address\0\u{1}signature\0\u{3}apn_token\0\u{3}fcm_token\0\u{4}type\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_pubkeys\0\u{3}wallet_address\0\u{1}signature\0\u{3}apn_token\0\u{3}fcm_token\0\u{1}type\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._devicePubkeys) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.walletAddress) }()
       case 3: try { try decoder.decodeSingularBytesField(value: &self.signature) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self.apnToken) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self.fcmToken) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._apnToken) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._fcmToken) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.type) }()
       default: break
       }
@@ -834,6 +1039,10 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     try { if let v = self._devicePubkeys {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
@@ -843,12 +1052,12 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.signature.isEmpty {
       try visitor.visitSingularBytesField(value: self.signature, fieldNumber: 3)
     }
-    if !self.apnToken.isEmpty {
-      try visitor.visitSingularStringField(value: self.apnToken, fieldNumber: 4)
-    }
-    if !self.fcmToken.isEmpty {
-      try visitor.visitSingularStringField(value: self.fcmToken, fieldNumber: 5)
-    }
+    try { if let v = self._apnToken {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._fcmToken {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
     if !self.type.isEmpty {
       try visitor.visitSingularStringField(value: self.type, fieldNumber: 6)
     }
@@ -859,8 +1068,8 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs._devicePubkeys != rhs._devicePubkeys {return false}
     if lhs.walletAddress != rhs.walletAddress {return false}
     if lhs.signature != rhs.signature {return false}
-    if lhs.apnToken != rhs.apnToken {return false}
-    if lhs.fcmToken != rhs.fcmToken {return false}
+    if lhs._apnToken != rhs._apnToken {return false}
+    if lhs._fcmToken != rhs._fcmToken {return false}
     if lhs.type != rhs.type {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -902,38 +1111,45 @@ extension Noxy_Device_DevicePublicKeys: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
-extension Noxy_Device_SubscribeNotifications: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".SubscribeNotifications"
+extension Noxy_Device_SubscribeDecisions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".SubscribeDecisions"
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}subscribe\0\u{3}apn_token\0\u{3}fcm_token\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self._subscribe) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.apnToken) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.fcmToken) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._apnToken) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._fcmToken) }()
       default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     try { if let v = self._subscribe {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
     } }()
-    if !self.apnToken.isEmpty {
-      try visitor.visitSingularStringField(value: self.apnToken, fieldNumber: 2)
-    }
-    if !self.fcmToken.isEmpty {
-      try visitor.visitSingularStringField(value: self.fcmToken, fieldNumber: 3)
-    }
+    try { if let v = self._apnToken {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._fcmToken {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Noxy_Device_SubscribeNotifications, rhs: Noxy_Device_SubscribeNotifications) -> Bool {
+  static func ==(lhs: Noxy_Device_SubscribeDecisions, rhs: Noxy_Device_SubscribeDecisions) -> Bool {
     if lhs._subscribe != rhs._subscribe {return false}
-    if lhs.apnToken != rhs.apnToken {return false}
-    if lhs.fcmToken != rhs.fcmToken {return false}
+    if lhs._apnToken != rhs._apnToken {return false}
+    if lhs._fcmToken != rhs._fcmToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1018,9 +1234,9 @@ extension Noxy_Device_RotateDeviceKeys: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
-extension Noxy_Device_ClientAck: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".ClientAck"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}received_at\0")
+extension Noxy_Device_DecisionOutcome: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".DecisionOutcome"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}decision_id\0\u{1}outcome\0\u{3}received_at\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1028,25 +1244,30 @@ extension Noxy_Device_ClientAck: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.messageID) }()
-      case 2: try { try decoder.decodeSingularUInt64Field(value: &self.receivedAt) }()
+      case 1: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.outcome) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.receivedAt) }()
       default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.messageID.isEmpty {
-      try visitor.visitSingularStringField(value: self.messageID, fieldNumber: 1)
+    if !self.decisionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 1)
+    }
+    if self.outcome != .approve {
+      try visitor.visitSingularEnumField(value: self.outcome, fieldNumber: 2)
     }
     if self.receivedAt != 0 {
-      try visitor.visitSingularUInt64Field(value: self.receivedAt, fieldNumber: 2)
+      try visitor.visitSingularUInt64Field(value: self.receivedAt, fieldNumber: 3)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Noxy_Device_ClientAck, rhs: Noxy_Device_ClientAck) -> Bool {
-    if lhs.messageID != rhs.messageID {return false}
+  static func ==(lhs: Noxy_Device_DecisionOutcome, rhs: Noxy_Device_DecisionOutcome) -> Bool {
+    if lhs.decisionID != rhs.decisionID {return false}
+    if lhs.outcome != rhs.outcome {return false}
     if lhs.receivedAt != rhs.receivedAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1055,7 +1276,7 @@ extension Noxy_Device_ClientAck: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 extension Noxy_Device_DeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".DeviceResponse"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}message_id\0\u{1}status\0\u{1}timestamp\0\u{1}authenticate\0\u{3}register_device\0\u{3}subscribe_notifications\0\u{3}revoke_device\0\u{3}rotate_device_keys\0\u{3}client_ack\0\u{3}push_event\0\u{1}error\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}message_id\0\u{1}status\0\u{1}timestamp\0\u{1}authenticate\0\u{3}register_device\0\u{3}subscribe_decisions\0\u{3}revoke_device\0\u{3}rotate_device_keys\0\u{3}decision_outcome\0\u{3}decision_event\0\u{1}error\0\u{3}decision_routed\0\u{3}decision_ack\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1094,16 +1315,16 @@ extension Noxy_Device_DeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._Mess
         }
       }()
       case 7: try {
-        var v: Noxy_Device_SubscribeNotificationsResponse?
+        var v: Noxy_Device_SubscribeDecisionsResponse?
         var hadOneofValue = false
         if let current = self.payload {
           hadOneofValue = true
-          if case .subscribeNotifications(let m) = current {v = m}
+          if case .subscribeDecisions(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.payload = .subscribeNotifications(v)
+          self.payload = .subscribeDecisions(v)
         }
       }()
       case 8: try {
@@ -1133,29 +1354,29 @@ extension Noxy_Device_DeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._Mess
         }
       }()
       case 10: try {
-        var v: Noxy_Device_ClientAckResponse?
+        var v: Noxy_Device_DecisionOutcomeResponse?
         var hadOneofValue = false
         if let current = self.payload {
           hadOneofValue = true
-          if case .clientAck(let m) = current {v = m}
+          if case .decisionOutcome(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.payload = .clientAck(v)
+          self.payload = .decisionOutcome(v)
         }
       }()
       case 11: try {
-        var v: Noxy_Device_PushEvent?
+        var v: Noxy_Device_DecisionEvent?
         var hadOneofValue = false
         if let current = self.payload {
           hadOneofValue = true
-          if case .pushEvent(let m) = current {v = m}
+          if case .decisionEvent(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.payload = .pushEvent(v)
+          self.payload = .decisionEvent(v)
         }
       }()
       case 12: try {
@@ -1169,6 +1390,32 @@ extension Noxy_Device_DeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._Mess
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
           self.payload = .error(v)
+        }
+      }()
+      case 13: try {
+        var v: Noxy_Device_DecisionRoutedResponse?
+        var hadOneofValue = false
+        if let current = self.payload {
+          hadOneofValue = true
+          if case .decisionRouted(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.payload = .decisionRouted(v)
+        }
+      }()
+      case 14: try {
+        var v: Noxy_Device_DecisionAckResponse?
+        var hadOneofValue = false
+        if let current = self.payload {
+          hadOneofValue = true
+          if case .decisionAck(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.payload = .decisionAck(v)
         }
       }()
       default: break
@@ -1202,8 +1449,8 @@ extension Noxy_Device_DeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._Mess
       guard case .registerDevice(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
     }()
-    case .subscribeNotifications?: try {
-      guard case .subscribeNotifications(let v)? = self.payload else { preconditionFailure() }
+    case .subscribeDecisions?: try {
+      guard case .subscribeDecisions(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     }()
     case .revokeDevice?: try {
@@ -1214,17 +1461,25 @@ extension Noxy_Device_DeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._Mess
       guard case .rotateDeviceKeys(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     }()
-    case .clientAck?: try {
-      guard case .clientAck(let v)? = self.payload else { preconditionFailure() }
+    case .decisionOutcome?: try {
+      guard case .decisionOutcome(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
-    case .pushEvent?: try {
-      guard case .pushEvent(let v)? = self.payload else { preconditionFailure() }
+    case .decisionEvent?: try {
+      guard case .decisionEvent(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
     }()
     case .error?: try {
       guard case .error(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+    }()
+    case .decisionRouted?: try {
+      guard case .decisionRouted(let v)? = self.payload else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+    }()
+    case .decisionAck?: try {
+      guard case .decisionAck(let v)? = self.payload else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
     }()
     case nil: break
     }
@@ -1242,8 +1497,38 @@ extension Noxy_Device_DeviceResponse: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
-extension Noxy_Device_PushEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".PushEvent"
+extension Noxy_Device_DecisionAckResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".DecisionAckResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}decision_id\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.decisionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Noxy_Device_DecisionAckResponse, rhs: Noxy_Device_DecisionAckResponse) -> Bool {
+    if lhs.decisionID != rhs.decisionID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Noxy_Device_DecisionEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".DecisionEvent"
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}kyber_ct\0\u{1}nonce\0\u{1}ciphertext\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -1273,7 +1558,7 @@ extension Noxy_Device_PushEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Noxy_Device_PushEvent, rhs: Noxy_Device_PushEvent) -> Bool {
+  static func ==(lhs: Noxy_Device_DecisionEvent, rhs: Noxy_Device_DecisionEvent) -> Bool {
     if lhs.kyberCt != rhs.kyberCt {return false}
     if lhs.nonce != rhs.nonce {return false}
     if lhs.ciphertext != rhs.ciphertext {return false}
@@ -1366,8 +1651,8 @@ extension Noxy_Device_RegisterDeviceResponse: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
-extension Noxy_Device_SubscribeNotificationsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".SubscribeNotificationsResponse"
+extension Noxy_Device_SubscribeDecisionsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".SubscribeDecisionsResponse"
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}subscribed\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -1389,7 +1674,7 @@ extension Noxy_Device_SubscribeNotificationsResponse: SwiftProtobuf.Message, Swi
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Noxy_Device_SubscribeNotificationsResponse, rhs: Noxy_Device_SubscribeNotificationsResponse) -> Bool {
+  static func ==(lhs: Noxy_Device_SubscribeDecisionsResponse, rhs: Noxy_Device_SubscribeDecisionsResponse) -> Bool {
     if lhs.subscribed != rhs.subscribed {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1456,9 +1741,9 @@ extension Noxy_Device_RotateDeviceKeysResponse: SwiftProtobuf.Message, SwiftProt
   }
 }
 
-extension Noxy_Device_ClientAckResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".ClientAckResponse"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}acked_message_id\0")
+extension Noxy_Device_DecisionOutcomeResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".DecisionOutcomeResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}decision_id\0\u{1}outcome\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1466,21 +1751,56 @@ extension Noxy_Device_ClientAckResponse: SwiftProtobuf.Message, SwiftProtobuf._M
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.ackedMessageID) }()
+      case 1: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.outcome) }()
       default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.ackedMessageID.isEmpty {
-      try visitor.visitSingularStringField(value: self.ackedMessageID, fieldNumber: 1)
+    if !self.decisionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 1)
+    }
+    if self.outcome != .approve {
+      try visitor.visitSingularEnumField(value: self.outcome, fieldNumber: 2)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Noxy_Device_ClientAckResponse, rhs: Noxy_Device_ClientAckResponse) -> Bool {
-    if lhs.ackedMessageID != rhs.ackedMessageID {return false}
+  static func ==(lhs: Noxy_Device_DecisionOutcomeResponse, rhs: Noxy_Device_DecisionOutcomeResponse) -> Bool {
+    if lhs.decisionID != rhs.decisionID {return false}
+    if lhs.outcome != rhs.outcome {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Noxy_Device_DecisionRoutedResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".DecisionRoutedResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}decision_id\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.decisionID) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.decisionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.decisionID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Noxy_Device_DecisionRoutedResponse, rhs: Noxy_Device_DecisionRoutedResponse) -> Bool {
+    if lhs.decisionID != rhs.decisionID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

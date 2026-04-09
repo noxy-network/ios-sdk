@@ -1,8 +1,8 @@
 import Foundation
 import Crypto
 
-/// Decrypts encrypted notifications using Kyber decapsulation, HKDF key derivation, and AES-GCM.
-public final class NoxyNotificationModule {
+/// Decrypts encrypted decision payloads from the Noxy Decision Layer (Kyber + HKDF + AES-GCM).
+public final class NoxyDecisionCryptoModule {
     private let deviceModule: NoxyDeviceModule
     private let kyber: NoxyKyberProvider
 
@@ -11,10 +11,10 @@ public final class NoxyNotificationModule {
         self.kyber = kyber
     }
 
-    /// Decrypt notification envelope to plain payload (JSON object as [String: Any])
-    public func decryptNotification(_ envelope: NoxyEncryptedNotification) async throws -> [String: Any]? {
+    /// Decrypt a decision event envelope to a plain JSON object (e.g. `decision_id`, `title`, `body`).
+    public func decryptDecision(_ envelope: NoxyEncryptedDecision) async throws -> [String: Any]? {
         guard let keys = try await deviceModule.loadDevicePrivateKeys() else {
-            throw NoxyError.general("Device cannot decrypt notification")
+            throw NoxyError.general("Device cannot decrypt decision")
         }
 
         let sharedSecret: Data
@@ -24,7 +24,6 @@ public final class NoxyNotificationModule {
             throw NoxyError.general("Kyber decapsulation failed: \(error)")
         }
 
-        // HKDF salt: try both 32-zero and empty for cross-SDK compatibility.
         let sealedBox = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: envelope.nonce), ciphertext: envelope.ciphertextWithoutTag, tag: envelope.tag)
         let salts: [Data] = [Data(repeating: 0, count: 32), Data()]
         var plaintext: Data?

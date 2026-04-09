@@ -2,10 +2,10 @@ import XCTest
 @testable import NoxySDK
 import Crypto
 
-/// Verifies notification decryption: Kyber decapsulate → HKDF → AES-GCM decrypt
-final class NotificationDecryptionTests: XCTestCase {
+/// Verifies decision payload decryption: Kyber decapsulate → HKDF → AES-GCM decrypt
+final class DecisionDecryptionTests: XCTestCase {
 
-    func testDecryptNotificationRoundTrip() async throws {
+    func testDecryptDecisionRoundTrip() async throws {
         let kyber = NoxyKyberProvider()
         let storage = NoxyStorage(serviceName: "noxy-test-\(UUID().uuidString)")
         let deviceModule = NoxyDeviceModule(storage: storage, kyber: kyber)
@@ -21,9 +21,9 @@ final class NotificationDecryptionTests: XCTestCase {
             return
         }
 
-        let notificationModule = NoxyNotificationModule(deviceModule: deviceModule, kyber: kyber)
+        let decisionCrypto = NoxyDecisionCryptoModule(deviceModule: deviceModule, kyber: kyber)
 
-        let plainPayload: [String: Any] = ["type": "test", "title": "Hello", "message": "World"]
+        let plainPayload: [String: Any] = ["decision_id": "d1", "title": "Hello", "body": "Approve?"]
         let plainData = try JSONSerialization.data(withJSONObject: plainPayload)
 
         let (kyberCt, sharedSecret) = try kyber.encapsulate(publicKey: devicePqPublicKey)
@@ -36,16 +36,16 @@ final class NotificationDecryptionTests: XCTestCase {
         var ciphertext = sealedBox.ciphertext
         ciphertext.append(contentsOf: sealedBox.tag)
 
-        let envelope = NoxyEncryptedNotification(
+        let envelope = NoxyEncryptedDecision(
             kyberCt: kyberCt,
             nonce: Data(nonce),
             ciphertext: ciphertext
         )
 
-        let decrypted = try await notificationModule.decryptNotification(envelope)
+        let decrypted = try await decisionCrypto.decryptDecision(envelope)
         XCTAssertNotNil(decrypted)
-        XCTAssertEqual(decrypted?["type"] as? String, "test")
+        XCTAssertEqual(decrypted?["decision_id"] as? String, "d1")
         XCTAssertEqual(decrypted?["title"] as? String, "Hello")
-        XCTAssertEqual(decrypted?["message"] as? String, "World")
+        XCTAssertEqual(decrypted?["body"] as? String, "Approve?")
     }
 }

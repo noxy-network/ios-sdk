@@ -1,11 +1,11 @@
 import Foundation
 
-/// Create and initialize a Noxy client
+/// Create a Noxy client for the Decision Layer (encrypted decision requests + outcomes).
 ///
 /// - Parameters:
 ///   - identity: EOA or SCW wallet identity with signer
 ///   - network: Relay gRPC URL and app ID
-/// - Returns: Initialized NoxyClient
+/// - Returns: `NoxyClient`
 ///
 /// Example:
 /// ```swift
@@ -18,7 +18,7 @@ import Foundation
 ///     network: NoxyNetworkOptions(appId: "your-app", relayUrl: "https://relay.noxy.network")
 /// )
 /// try await client.initialize()
-/// try await client.on { notification in print(notification) }
+/// try await client.on { messageId, decision in print(messageId as Any, decision) }
 /// ```
 public func createNoxyClient(
     identity: NoxyIdentity,
