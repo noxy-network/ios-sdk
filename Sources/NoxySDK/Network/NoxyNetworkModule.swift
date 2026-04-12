@@ -17,8 +17,23 @@ public final class NoxyNetworkModule: @unchecked Sendable {
     private let lock = NSLock()
     private let connectionLock = NSLock()
 
+    /// When the transport is (re)opened, run auth / announce / subscribe so the relay session matches local device state.
+    private var sessionRestore: (@Sendable () async throws -> Void)?
+    /// User called ``disconnect()``; stops ``reconnectLoop`` and clears handlers.
+    private var userInitiatedDisconnect = false
+    private var maintainTask: Task<Void, Never>?
+    /// Resumed after the first successful ``sessionRestore`` following ``connect()``.
+    private var firstConnectContinuation: CheckedContinuation<Void, Error>?
+
     public init(options: NoxyNetworkOptions) {
         self.options = options
+    }
+
+    /// Register closure invoked after each new gRPC transport (initial connect and every reconnect). Typically: authenticate, announce if needed, subscribe if the app registered a decision handler.
+    public func setSessionRestore(_ handler: (@Sendable () async throws -> Void)?) {
+        connectionLock.lock()
+        defer { connectionLock.unlock() }
+        sessionRestore = handler
     }
 
     public var isConnected: Bool { channel != nil }
@@ -42,12 +57,27 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         return (host, port)
     }
 
-    /// Connect to relay via gRPC (always TLS).
-    /// Waits for any in-progress disconnect to finish before connecting (avoids race conditions).
+    /// Connect to relay and start ``reconnectLoop`` so the stream is recreated whenever it drops, until ``disconnect()``.
+    /// Suspends until the first successful ``sessionRestore`` (or throws if ``disconnect()`` happens while waiting).
     public func connect() async throws {
-        connectionLock.lock()
-        defer { connectionLock.unlock() }
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            connectionLock.lock()
+            if maintainTask != nil {
+                connectionLock.unlock()
+                cont.resume()
+                return
+            }
+            userInitiatedDisconnect = false
+            firstConnectContinuation = cont
+            maintainTask = Task { [weak self] in
+                await self?.reconnectLoop()
+            }
+            connectionLock.unlock()
+        }
+    }
 
+    /// Opens TLS channel + bidirectional `HandleMessage` stream and starts the response reader task.
+    private func openTransportAndStream() async throws {
         let (host, port) = try parseRelayURL(options.relayUrl)
         let group = PlatformSupport.makeEventLoopGroup(loopCount: 1)
         let tlsConfig = GRPCTLSConfiguration.makeClientDefault(compatibleWith: group)
@@ -72,8 +102,105 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         streamCall = call
 
         responseTask = Task { [weak self] in
-            try await self?.processResponseStream(call)
+            guard let self else { return }
+            try await self.processResponseStream(call)
         }
+    }
+
+    /// Infinite reconnect: backoff only after failed open or failed ``sessionRestore``; **immediate** retry after the response stream ends cleanly.
+    private func reconnectLoop() async {
+        defer {
+            connectionLock.lock()
+            maintainTask = nil
+            connectionLock.unlock()
+        }
+
+        var failureStreak = 0
+        var didCompleteFirstRestore = false
+
+        while !userInitiatedDisconnect {
+            if Task.isCancelled { return }
+
+            if failureStreak > 0 {
+                let delaySec = min(pow(2.0, Double(failureStreak - 1)), 30.0)
+                let ns = UInt64(delaySec * 1_000_000_000)
+                do {
+                    try await Task.sleep(nanoseconds: ns)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+            }
+
+            if userInitiatedDisconnect || Task.isCancelled { return }
+
+            do {
+                try await openTransportAndStream()
+                try await sessionRestore?()
+
+                failureStreak = 0
+
+                if !didCompleteFirstRestore {
+                    didCompleteFirstRestore = true
+                    connectionLock.lock()
+                    firstConnectContinuation?.resume()
+                    firstConnectContinuation = nil
+                    connectionLock.unlock()
+                }
+
+                await waitForResponseStreamToComplete()
+
+                if userInitiatedDisconnect || Task.isCancelled { return }
+
+                await teardownTransportForReconnect()
+            } catch {
+                if userInitiatedDisconnect || Task.isCancelled { return }
+                failureStreak += 1
+                await teardownTransportForReconnect()
+
+                #if DEBUG
+                print("[NoxySDK][Network] reconnect attempt failed (failureStreak=\(failureStreak)): \(error)")
+                #endif
+            }
+        }
+    }
+
+    private func waitForResponseStreamToComplete() async {
+        guard let task = responseTask else { return }
+        do {
+            try await task.value
+        } catch is CancellationError {
+            // Expected when forcing transport reset (e.g. wake-up).
+        } catch {
+            #if DEBUG
+            print("[NoxySDK][Network] response stream ended: \(error)")
+            #endif
+        }
+    }
+
+    /// Tear down channel/stream only; keeps ``decisionHandler`` and does not set ``userInitiatedDisconnect``.
+    private func teardownTransportForReconnect() async {
+        responseTask?.cancel()
+        responseTask = nil
+        streamCall?.requestStream.finish()
+        streamCall = nil
+
+        lock.lock()
+        for (_, cont) in pendingRequests {
+            cont.resume(throwing: NoxyError.general("Reconnecting"))
+        }
+        pendingRequests.removeAll()
+        lock.unlock()
+
+        setSessionId(nil)
+        setNetworkDeviceId(nil)
+
+        let ch = channel
+        channel = nil
+        try? ch?.close().wait()
+        try? eventLoopGroup?.syncShutdownGracefully()
+        eventLoopGroup = nil
     }
 
     private func processResponseStream(_ call: GRPCAsyncBidirectionalStreamingCall<Noxy_Device_DeviceRequest, Noxy_Device_DeviceResponse>) async throws {
@@ -163,21 +290,29 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         }
     }
 
-    /// Disconnect from relay
+    /// Disconnect from relay and stop ``reconnectLoop``.
     public func disconnect() async {
         connectionLock.lock()
-        defer { connectionLock.unlock() }
-        await performDisconnect()
+        userInitiatedDisconnect = true
+        firstConnectContinuation?.resume(throwing: NoxyError.general("Disconnected"))
+        firstConnectContinuation = nil
+        let task = maintainTask
+        connectionLock.unlock()
+
+        task?.cancel()
+        if let task {
+            await task.value
+        }
+        await performFullDisconnect()
     }
 
-    /// Quick disconnect for wake-up reconnect; prioritizes speed over graceful shutdown.
+    /// Drop the current transport so ``reconnectLoop`` reconnects immediately (e.g. APNs wake-up). Does not stop the loop or clear handlers.
     public func disconnectForReconnect() async {
-        connectionLock.lock()
-        defer { connectionLock.unlock() }
-        await performDisconnect()
+        responseTask?.cancel()
+        await teardownTransportForReconnect()
     }
 
-    private func performDisconnect() async {
+    private func performFullDisconnect() async {
         lock.lock()
         for (_, cont) in pendingRequests {
             cont.resume(throwing: NoxyError.general("Disconnected"))
@@ -197,6 +332,10 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         try? ch?.close().wait()
         try? eventLoopGroup?.syncShutdownGracefully()
         eventLoopGroup = nil
+
+        connectionLock.lock()
+        userInitiatedDisconnect = false
+        connectionLock.unlock()
     }
 
     /// Authenticate device with relay.

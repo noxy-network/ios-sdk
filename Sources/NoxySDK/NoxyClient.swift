@@ -40,10 +40,8 @@ public final class NoxyClient {
         return networkOptions.apnToken
     }
 
-    /// Initialize: load or create device, connect to network, authenticate.
+    /// Initialize: load or create device, connect to network, authenticate (and re-authenticate on every reconnect).
     public func initialize() async throws {
-        try await networkModule.connect()
-
         var device: NoxyDevice?
         if let loaded = try await deviceModule.load(identityId: identity.address, appId: networkOptions.appId) {
             device = loaded
@@ -55,21 +53,46 @@ public final class NoxyClient {
             )
         }
 
-        guard let dev = device else { throw NoxyError.initializationFailed("No device") }
+        guard device != nil else { throw NoxyError.initializationFailed("No device") }
 
-        let requiresRegistration = try await networkModule.authenticateDevice(dev)
+        networkModule.setSessionRestore { [weak self] in
+            guard let self else { throw NoxyError.general("Client released") }
+            try await self.restoreRelaySession()
+        }
+
+        try await networkModule.connect()
+    }
+
+    /// Runs after each new gRPC transport: authenticate, register if needed, re-subscribe when ``on(handler:)`` was used.
+    private func restoreRelaySession() async throws {
+        guard let device = try await deviceModule.load(identityId: identity.address, appId: networkOptions.appId),
+              !device.isRevoked else {
+            throw NoxyError.initializationFailed("No device")
+        }
+
+        let requiresRegistration = try await networkModule.authenticateDevice(device)
 
         if requiresRegistration {
-            guard let sig = dev.identitySignature else {
+            guard let sig = device.identitySignature else {
                 throw NoxyError.initializationFailed("Device has no identity signature for relay registration")
             }
             try await networkModule.announceDevice(
-                devicePubkeys: (dev.publicKey, dev.pqPublicKey),
-                walletAddress: dev.identityId,
+                devicePubkeys: (device.publicKey, device.pqPublicKey),
+                walletAddress: device.identityId,
                 signature: sig,
                 apnToken: effectiveApnToken
             )
         }
+
+        guard let h = decisionHandler else { return }
+        _ = try await deviceModule.loadDevicePrivateKeys()
+        try await networkModule.subscribeToDecisions(
+            handler: { [weak self] envelope, relayMessageId in
+                guard let self else { return }
+                await self.deliverDecision(envelope: envelope, relayMessageId: relayMessageId, notifyUser: h)
+            },
+            apnToken: effectiveApnToken
+        )
     }
 
     /// Revoke device locally and on relay
@@ -198,49 +221,8 @@ public final class NoxyClient {
             return
         }
         Task {
-            var result: NoxyWakeUpResult = .noData
-            defer { completion(result) }
-
-            if networkModule.isConnected {
-                await networkModule.disconnectForReconnect()
-            }
-            guard let device = try? await deviceModule.load(identityId: identity.address, appId: networkOptions.appId),
-                  !device.isRevoked else {
-                return
-            }
-            guard let _ = try? await deviceModule.loadDevicePrivateKeys() else { return }
-
-            let maxAttempts = 3
-            for attempt in 1...maxAttempts {
-                do {
-                    try await networkModule.connect()
-                    _ = try await networkModule.authenticateDevice(device)
-                    try await networkModule.subscribeToDecisions(
-                        handler: { [weak self] envelope, relayMessageId in
-                            guard let self else { return }
-                            Task {
-                                await self.deliverDecision(envelope: envelope, relayMessageId: relayMessageId) { messageId, decision in
-                                    result = .newData
-                                    let handler = self.decisionHandler
-                                    DispatchQueue.main.async { handler?(messageId, decision) }
-                                }
-                            }
-                        },
-                        apnToken: effectiveApnToken
-                    )
-                    break
-                } catch {
-                    if attempt < maxAttempts {
-                        await networkModule.disconnectForReconnect()
-                        try? await Task.sleep(nanoseconds: 500_000_000)
-                    } else {
-                        result = .failed
-                        return
-                    }
-                }
-            }
-
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            await networkModule.disconnectForReconnect()
+            completion(.newData)
         }
     }
 
