@@ -24,7 +24,7 @@ public final class NoxyDeviceModule {
         "\(device.appId)_\(device.identityId)"
     }
 
-    private func devicesKey(identityId: WalletAddress) -> String {
+    private func devicesKey(identityId: String) -> String {
         "devices_\(identityId)"
     }
 
@@ -55,7 +55,7 @@ public final class NoxyDeviceModule {
     }
 
     /// Load device for identity
-    public func load(identityId: WalletAddress, appId: String? = nil) async throws -> NoxyDevice? {
+    public func load(identityId: String, appId: String? = nil) async throws -> NoxyDevice? {
         let key = devicesKey(identityId: identityId)
         guard let data = try storage.load(key: key) else {
             return nil
@@ -71,16 +71,16 @@ public final class NoxyDeviceModule {
     }
 
     /// Register new device
-    public func register(
-        appId: String,
-        identityId: WalletAddress,
-        identitySigner: SignerClosure?
-    ) async throws -> NoxyDevice {
+    public func register(appId: String, identity: NoxyIdentity, appSigningSecret: String) async throws -> NoxyDevice {
         let (keyPair, pqKeyPair) = generateKeys()
         let issuedAt = UInt64(Date().timeIntervalSince1970 * 1000)
 
+        let logicalId = logicalIdentityIdOf(identity)
+        let relayType = relayIdentityTypeOf(identity)
+
         var device = NoxyDevice(
-            identityId: identityId,
+            identityId: logicalId,
+            relayIdentityType: relayType,
             appId: appId,
             isRevoked: false,
             issuedAt: issuedAt,
@@ -89,11 +89,15 @@ public final class NoxyDeviceModule {
             identitySignature: nil
         )
 
-        let hash = try buildIdentitySignatureHash(device: device)
-        if let signer = identitySigner {
-            let sig = try await signer(hash)
-            device.identitySignature = sig.bytes
-        }
+        device.identitySignature = try NoxyDeviceRegistrationMac.sign(
+            secret: appSigningSecret,
+            appId: appId,
+            identityType: relayType,
+            logicalIdentityId: logicalId,
+            publicKey: keyPair.publicKey,
+            pqPublicKey: pqKeyPair.publicKey,
+            deviceType: "ios"
+        )
 
         currentDevice = device
         try await persistDevice(device)
@@ -125,6 +129,7 @@ public final class NoxyDeviceModule {
 
         let updatedDevice = NoxyDevice(
             identityId: device.identityId,
+            relayIdentityType: device.relayIdentityType,
             appId: device.appId,
             isRevoked: device.isRevoked,
             issuedAt: device.issuedAt,
@@ -178,6 +183,7 @@ public final class NoxyDeviceModule {
 
 private struct NoxyDeviceCodable: Codable {
     let identityId: String
+    let relayIdentityType: String?
     let appId: String
     let isRevoked: Bool
     let issuedAt: UInt64
@@ -187,6 +193,7 @@ private struct NoxyDeviceCodable: Codable {
 
     init(from d: NoxyDevice) {
         identityId = d.identityId
+        relayIdentityType = d.relayIdentityType.rawValue
         appId = d.appId
         isRevoked = d.isRevoked
         issuedAt = d.issuedAt
@@ -196,8 +203,10 @@ private struct NoxyDeviceCodable: Codable {
     }
 
     func toDevice() -> NoxyDevice {
-        NoxyDevice(
+        let rt = relayIdentityType.flatMap { NoxyRelayIdentityType(rawValue: $0) } ?? .wallet
+        return NoxyDevice(
             identityId: identityId,
+            relayIdentityType: rt,
             appId: appId,
             isRevoked: isRevoked,
             issuedAt: issuedAt,

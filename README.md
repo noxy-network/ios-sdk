@@ -1,20 +1,34 @@
 # 📦 @noxy-network/ios-sdk
 
-IOS SDK to integrate with the [Noxy](https://noxy.network) **Decision Layer**: subscribe to encrypted decision requests, present them to the user, and respond with decision — all with wallet-based identity.
+IOS SDK for [Noxy](https://noxy.network).
 
-Users register a device once with a wallet signature. The relay streams encrypted decision payloads; the SDK decrypts them locally and can send `DecisionOutcome` back over the same gRPC session.
+## What is Noxy?
 
-**Before you integrate:** Create your app at [noxy.network](https://noxy.network). When the app is created, you receive an **app id** and an **app token** (auth token). This iOS SDK uses the **app id** (`appId` in `NoxyNetworkOptions`). The **app token** is for agent/orchestrator SDKs (Go, Rust, Python, Node, etc.), not for this package.
+[Noxy](https://noxy.network) adds **human-in-the-loop** guardrails: encrypted prompts reach your app, the **user makes a decision**, and your app **sends the outcome** to the relay.
+
+Users register a device once using **`appSigningSecret`** (registration HMAC). This SDK decrypts payloads locally and sends **`DecisionOutcome`** over **gRPC**.
+
+## Before you integrate
+
+Create your app at [noxy.network](https://noxy.network). On the dashboard, copy **APP_ID** into **`appId`** and **APP_SIGNING_SECRET** into **`appSigningSecret`** in `NoxyNetworkOptions`. Device registration uses an HMAC from **APP_SIGNING_SECRET**. Agent backends use a separate **app token**, not these values.
 
 ---
 
 ## Features
 
-- **Wallet-based identity** — EOA and Smart Contract Wallets
-- **Encrypted decision events** — Kyber (post-quantum) + AES-GCM for payloads from the Decision Layer
-- **Subscribe / outcomes** — `SubscribeDecisions` on the relay; `sendDecisionOutcome` for approve/reject
-- **Optional APNs wake-up** — Reconnect when the app is backgrounded (`setApnsToken`, `handleWakeUpNotification`)
-- **Secure storage** — iOS Keychain for device data and private keys
+- **Human-in-the-loop payloads** — Kyber (post-quantum) + AES-GCM for encrypted prompts from the relay.
+- **Relay identities** — **`wallet`**, **`email`**, **`phone`**, **`user_id`** — see [Relay identity types](#relay-identity-types) (Swift **`NoxyIdentity.userId`** ↔ wire **`user_id`**).
+- **Subscribe / outcomes** — `SubscribeDecisions` on the relay; `sendDecisionOutcome` to publish the user’s outcome.
+- **Optional APNs wake-up** — Reconnect when the app is backgrounded (`setApnsToken`, `handleWakeUpNotification`).
+- **Secure storage** — iOS Keychain for device data and private keys.
+
+---
+
+## Relay identity types
+
+The relay **`identity_type`** values are **`wallet`**, **`email`**, **`phone`**, and **`user_id`**. In Swift, **`NoxyIdentity.userId`** maps to relay **`user_id`**. Use **`logicalIdentityIdOf(_:)`** and **`NoxyClient.logicalIdentityId`** for the stable logical id string; **`address`** is defined only for wallet identities (**`eoa`** / **`scw`**).
+
+Wallet flows use **`NoxyIdentity.eoa`** / **`scw`**. Non-wallet flows use **`NoxyIdentity.email`**, **`.phone`**, **`.userId`** (no separate registration signer). **`NoxyNetworkOptions.appSigningSecret`** supplies the registration HMAC for every kind.
 
 ---
 
@@ -32,8 +46,8 @@ func createNoxyClient(
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `identity` | **Yes** | `NoxyIdentity` | EOA or SCW wallet identity with signer. |
-| `network` | **Yes** | `NoxyNetworkOptions` | Relay URL and app configuration. |
+| `identity` | **Yes** | `NoxyIdentity` | `.eoa` / `.scw` (**wallet**, include `signer`), or `.email`, `.phone`, `.userId` without a registration signer. |
+| `network` | **Yes** | `NoxyNetworkOptions` | Relay URL, **`appId`**, and **`appSigningSecret`** (registration HMAC). |
 | `storage` | No | `NoxyStorage` | Custom secure storage. Default: Keychain. |
 
 ---
@@ -44,6 +58,7 @@ func createNoxyClient(
 |-----------|----------|------|---------|-------------|
 | `appId` | **Yes** | `String` | — | Application identifier from Noxy. |
 | `relayUrl` | **Yes** | `String` | — | gRPC endpoint (e.g. `"https://relay.noxy.network"`). |
+| `appSigningSecret` | **Yes** | `String` | — | Dashboard **APP_SIGNING_SECRET**; required for device registration (HMAC). |
 | `maxRetries` | No | `Int` | `5` | Max retries for transient failures. |
 | `retryTimeoutMs` | No | `UInt64` | `15_000` | Retry timeout in milliseconds. |
 | `apnToken` | No | `String?` | `nil` | APNs token for wake-up pushes. When set, app works **online + offline**; when nil, **online only**. |
@@ -52,9 +67,9 @@ Delivery acknowledgements (`DecisionAck`) are sent automatically after each succ
 
 ---
 
-### NoxyIdentity & Wallet Identity
+### NoxyIdentity (wallet, email, phone, user_id)
 
-**NoxyEoaWalletIdentity** / **NoxyScwWalletIdentity**:
+**NoxyEoaWalletIdentity** / **NoxyScwWalletIdentity** (relay **`identity_type`**: **`wallet`**):
 
 | Parameter | Required | Type | Default | Description |
 |-----------|----------|------|---------|-------------|
@@ -63,6 +78,16 @@ Delivery acknowledgements (`DecisionAck`) are sent automatically after each succ
 | `chainId` | No | `String?` | `nil` | Chain ID for context. |
 | `publicKey` | No | `Data?` | `nil` | Public key (if available). |
 | `publicKeyType` | No | `NoxyIdentityCryptoKeyType?` | `nil` | Key type (e.g. `secp256k1`). |
+
+Non-wallet identities do not use a separate registration signer; relay **`identity_type`** is **`email`**, **`phone`**, or **`user_id`** respectively:
+
+```swift
+NoxyIdentity.email(email: "you@example.com")
+NoxyIdentity.phone(phone: "+15551234567")
+NoxyIdentity.userId(userId: "internal-123")  // relay identity_type "user_id"
+```
+
+Helpers `logicalIdentityIdOf(_:)` and `relayIdentityTypeOf(_:)` align with the relay. On `NoxyClient`, use **`logicalIdentityId`** for the stable string across all kinds; **`address`** is wallet-only (fatal error for email/phone/user id).
 
 ---
 
@@ -83,14 +108,14 @@ Delivery acknowledgements (`DecisionAck`) are sent automatically after each succ
 | `initialize()` | Load or create device, connect to relay, authenticate |
 | `setApnsToken(_:)` | Register APNs token for wake-up when backgrounded |
 | `on(handler:)` | Subscribe to encrypted decisions; handler receives `(messageId, decision)` |
-| `sendDecisionOutcome(decisionId:outcome:receivedAt:)` | Send approve/reject to the relay |
+| `sendDecisionOutcome(decisionId:outcome:receivedAt:)` | Send **`DecisionOutcome`** for the user’s choice |
 | `sendDecisionAck(decisionId:receivedAt:)` | Delivery ack (not the user’s decision) |
 | `handleWakeUpNotification(fetchCompletionHandler:)` | Reconnect decision stream when woken by APNs |
 | `revokeDevice()` | Revoke device locally and on relay |
 | `rotateKeys()` | Rotate device keys locally and on relay |
 | `close()` | Disconnect from relay |
 
-**Properties:** `address`, `isDeviceActive`, `isRelayConnected`, `isNetworkReady`
+**Properties:** `logicalIdentityId`, `address` (wallet-only), `isDeviceActive`, `isRelayConnected`, `isNetworkReady`
 
 ---
 
@@ -141,10 +166,11 @@ Once the package is resolved and linked, `import NoxySDK` will work.
 
 ## Quick Start
 
+### Wallet (`identity_type` **wallet**)
+
 ```swift
 import NoxySDK
 
-// 1. Create identity with wallet signer
 let identity = NoxyIdentity.eoa(NoxyEoaWalletIdentity(
     address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     signer: { data in
@@ -153,30 +179,50 @@ let identity = NoxyIdentity.eoa(NoxyEoaWalletIdentity(
     }
 ))
 
-// 2. Create client
 let client = createNoxyClient(
     identity: identity,
     network: NoxyNetworkOptions(
         appId: "your-app-id",
-        relayUrl: "https://relay.noxy.network"
+        relayUrl: "https://relay.noxy.network",
+        appSigningSecret: "paste-app-signing-secret-here",
     )
 )
 
-// 3. Initialize (loads or registers device, connects to relay)
 try await client.initialize()
 
-// 4. Subscribe to decision requests from the relay
 try await client.on { messageId, decision in
-    print("messageId:", messageId as Any, "decision:", decision)
-    // Show UI, use UNMutableNotificationContent
-    // e.g. decision_id, title, body — use sendDecisionOutcome when the user approves/rejects
+    // Present UI — user decides; send outcome when ready
 }
 
-// 5. after user taps Approve/Reject in your UI:
+// Choose the `DecisionOutcome` case that matches the user’s selection (`.approve`, `.reject`, etc.).
 try await client.sendDecisionOutcome(decisionId: "...", outcome: .approve)
 
-// 6. Disconnect when done
 await client.close()
+```
+
+### Email, phone, or `user_id`
+
+```swift
+// Relay identity_type "email"
+let identity = NoxyIdentity.email(email: "you@example.com") { data in
+    Signature(bytes: try await yourSigner.signDeviceBinding(data))
+}
+
+// Relay identity_type "phone"
+// let identity = NoxyIdentity.phone(phone: "+15551234567") { ... }
+
+// Relay identity_type "user_id" (Swift API: userId)
+// let identity = NoxyIdentity.userId(userId: "internal-user-123") { ... }
+
+let client = createNoxyClient(
+    identity: identity,
+    network: NoxyNetworkOptions(
+        appId: "your-app-id",
+        relayUrl: "https://relay.noxy.network",
+        appSigningSecret: "paste-app-signing-secret-here",
+    )
+)
+try await client.initialize()
 ```
 
 ---
@@ -207,6 +253,20 @@ let identity = NoxyIdentity.scw(NoxyScwWalletIdentity(
 ))
 ```
 
+### Email / phone / user id (relay **`user_id`**)
+
+```swift
+let emailIdentity = NoxyIdentity.email(email: "you@example.com")
+let phoneIdentity = NoxyIdentity.phone(phone: "+15551234567")
+let userIdIdentity = NoxyIdentity.userId(userId: "corp-user-xyz")
+
+let network = NoxyNetworkOptions(
+    appId: "your-app-id",
+    relayUrl: "https://relay.noxy.network",
+    appSigningSecret: "paste-app-signing-secret-here",
+)
+```
+
 ### Custom Storage (Keychain)
 
 ```swift
@@ -228,9 +288,9 @@ let client = createNoxyClient(
 )
 ```
 
-### Actionable notifications (Approve / Reject)
+### Actionable notifications (decision outcomes)
 
-Register a `UNNotificationCategory` with two `UNNotificationAction`s, set `content.categoryIdentifier`, and schedule a local notification from `on(handler:)`. In `userNotificationCenter(_:didReceive:withCompletionHandler:)`, read `decision_id` from `userInfo` and call `sendDecisionOutcome`.
+Register a `UNNotificationCategory` with actions whose handlers call **`sendDecisionOutcome`**. Example identifiers matching common outcome values:
 
 ```swift
 import UserNotifications
@@ -240,6 +300,8 @@ let rejected = UNNotificationAction(identifier: "REJECT", title: "Reject", optio
 let category = UNNotificationCategory(identifier: "DECISION", actions: [approved, rejected], intentIdentifiers: [], options: [])
 UNUserNotificationCenter.current().setNotificationCategories([category])
 ```
+
+Set `content.categoryIdentifier`, post from `on(handler:)` as needed, and in `userNotificationCenter(_:didReceive:withCompletionHandler:)` read `decision_id` from `userInfo` and call **`sendDecisionOutcome`**.
 
 ### Revoke or Rotate Device
 
@@ -255,8 +317,8 @@ try await client.rotateKeys()
 
 ## Security model
 
-- **Device registration** — Device signs once with the wallet; the signature binds the device to the identity.
-- **Decision encryption** — Kyber KEM, HKDF, AES-GCM for decision payloads from the relay.
+- **Device registration** — Device signs once with the identity signer; the signature binds the device to the relay identity (**wallet**, **email**, **phone**, or **user_id**).
+- **Human-in-the-loop payloads** — Kyber KEM, HKDF, AES-GCM for encrypted prompts from the relay.
 - **Relay** — Sees ciphertext on the wire; plaintext is handled only on-device after decryption.
 
 ---
@@ -267,7 +329,7 @@ try await client.rotateKeys()
 |--------|-------------|
 | `initialize()` | Load or create device, connect to relay, authenticate |
 | `on(handler:)` | Subscribe to decisions; handler receives `(messageId, decision)` |
-| `sendDecisionOutcome(decisionId:outcome:)` | Send approve/reject |
+| `sendDecisionOutcome(decisionId:outcome:)` | Send **`DecisionOutcome`** for the user’s choice |
 | `revokeDevice()` | Revoke device locally and on relay |
 | `rotateKeys()` | Rotate device keys locally and on relay |
 | `close()` | Disconnect from relay |

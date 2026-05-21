@@ -15,7 +15,11 @@ import Foundation
 /// ))
 /// let client = NoxyClient(
 ///     identity: identity,
-///     network: NoxyNetworkOptions(appId: "your-app", relayUrl: "https://relay.noxy.network")
+///     network: NoxyNetworkOptions(
+///         appId: "your-app",
+///         relayUrl: "https://relay.noxy.network",
+///         appSigningSecret: "your-app-signing-secret"
+///     )
 /// )
 /// try await client.initialize()
 /// try await client.on { messageId, decision in print(messageId as Any, decision) }

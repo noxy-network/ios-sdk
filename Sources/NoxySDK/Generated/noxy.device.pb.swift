@@ -25,6 +25,48 @@ fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAP
   typealias Version = _2
 }
 
+enum Noxy_Device_IdentityType: SwiftProtobuf.Enum, Swift.CaseIterable {
+  typealias RawValue = Int
+  case wallet // = 0
+  case email // = 1
+  case phone // = 2
+  case userID // = 3
+  case UNRECOGNIZED(Int)
+
+  init() {
+    self = .wallet
+  }
+
+  init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .wallet
+    case 1: self = .email
+    case 2: self = .phone
+    case 3: self = .userID
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  var rawValue: Int {
+    switch self {
+    case .wallet: return 0
+    case .email: return 1
+    case .phone: return 2
+    case .userID: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  static let allCases: [Noxy_Device_IdentityType] = [
+    .wallet,
+    .email,
+    .phone,
+    .userID,
+  ]
+
+}
+
 enum Noxy_Device_DecisionOutcomeValue: SwiftProtobuf.Enum, Swift.CaseIterable {
   typealias RawValue = Int
   case approve // = 0
@@ -323,7 +365,15 @@ struct Noxy_Device_RegisterDevice: Sendable {
   /// Clears the value of `devicePubkeys`. Subsequent reads from it will return its default value.
   mutating func clearDevicePubkeys() {self._devicePubkeys = nil}
 
-  var walletAddress: String = String()
+  //// Fallback when identity_id is omitted or empty (e.g. legacy wallet flows).
+  var walletAddress: String {
+    get {_walletAddress ?? String()}
+    set {_walletAddress = newValue}
+  }
+  /// Returns true if `walletAddress` has been explicitly set.
+  var hasWalletAddress: Bool {self._walletAddress != nil}
+  /// Clears the value of `walletAddress`. Subsequent reads from it will return its default value.
+  mutating func clearWalletAddress() {self._walletAddress = nil}
 
   var signature: Data = Data()
 
@@ -350,11 +400,17 @@ struct Noxy_Device_RegisterDevice: Sendable {
   /// required: browser, desktop, ios, android, telegram
   var type: String = String()
 
+  var identityType: Noxy_Device_IdentityType = .wallet
+
+  //// Primary logical identity id when set; otherwise wallet_address must be set.
+  var identityID: String = String()
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
   fileprivate var _devicePubkeys: Noxy_Device_DevicePublicKeys? = nil
+  fileprivate var _walletAddress: String? = nil
   fileprivate var _apnToken: String? = nil
   fileprivate var _fcmToken: String? = nil
 }
@@ -445,15 +501,27 @@ struct Noxy_Device_RotateDeviceKeys: Sendable {
   /// Clears the value of `newPubkeys`. Subsequent reads from it will return its default value.
   mutating func clearNewPubkeys() {self._newPubkeys = nil}
 
-  var walletAddress: String = String()
+  var walletAddress: String {
+    get {_walletAddress ?? String()}
+    set {_walletAddress = newValue}
+  }
+  /// Returns true if `walletAddress` has been explicitly set.
+  var hasWalletAddress: Bool {self._walletAddress != nil}
+  /// Clears the value of `walletAddress`. Subsequent reads from it will return its default value.
+  mutating func clearWalletAddress() {self._walletAddress = nil}
 
   var signature: Data = Data()
+
+  var identityType: Noxy_Device_IdentityType = .wallet
+
+  var identityID: String = String()
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
   fileprivate var _newPubkeys: Noxy_Device_DevicePublicKeys? = nil
+  fileprivate var _walletAddress: String? = nil
 }
 
 struct Noxy_Device_DecisionOutcome: Sendable {
@@ -754,6 +822,10 @@ struct Noxy_Device_ErrorResponse: Sendable {
 
 fileprivate let _protobuf_package = "noxy.device"
 
+extension Noxy_Device_IdentityType: SwiftProtobuf._ProtoNameProviding {
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0IDENTITY_TYPE_WALLET\0\u{1}IDENTITY_TYPE_EMAIL\0\u{1}IDENTITY_TYPE_PHONE\0\u{1}IDENTITY_TYPE_USER_ID\0")
+}
+
 extension Noxy_Device_DecisionOutcomeValue: SwiftProtobuf._ProtoNameProviding {
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0APPROVE\0\u{1}REJECT\0")
 }
@@ -1019,7 +1091,7 @@ extension Noxy_Device_Authenticate: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".RegisterDevice"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_pubkeys\0\u{3}wallet_address\0\u{1}signature\0\u{3}apn_token\0\u{3}fcm_token\0\u{1}type\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_pubkeys\0\u{3}wallet_address\0\u{1}signature\0\u{3}apn_token\0\u{3}fcm_token\0\u{1}type\0\u{3}identity_type\0\u{3}identity_id\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1028,11 +1100,13 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._devicePubkeys) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.walletAddress) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._walletAddress) }()
       case 3: try { try decoder.decodeSingularBytesField(value: &self.signature) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self._apnToken) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self._fcmToken) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.type) }()
+      case 7: try { try decoder.decodeSingularEnumField(value: &self.identityType) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.identityID) }()
       default: break
       }
     }
@@ -1046,9 +1120,9 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
     try { if let v = self._devicePubkeys {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    if !self.walletAddress.isEmpty {
-      try visitor.visitSingularStringField(value: self.walletAddress, fieldNumber: 2)
-    }
+    try { if let v = self._walletAddress {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
     if !self.signature.isEmpty {
       try visitor.visitSingularBytesField(value: self.signature, fieldNumber: 3)
     }
@@ -1061,16 +1135,24 @@ extension Noxy_Device_RegisterDevice: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.type.isEmpty {
       try visitor.visitSingularStringField(value: self.type, fieldNumber: 6)
     }
+    if self.identityType != .wallet {
+      try visitor.visitSingularEnumField(value: self.identityType, fieldNumber: 7)
+    }
+    if !self.identityID.isEmpty {
+      try visitor.visitSingularStringField(value: self.identityID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   static func ==(lhs: Noxy_Device_RegisterDevice, rhs: Noxy_Device_RegisterDevice) -> Bool {
     if lhs._devicePubkeys != rhs._devicePubkeys {return false}
-    if lhs.walletAddress != rhs.walletAddress {return false}
+    if lhs._walletAddress != rhs._walletAddress {return false}
     if lhs.signature != rhs.signature {return false}
     if lhs._apnToken != rhs._apnToken {return false}
     if lhs._fcmToken != rhs._fcmToken {return false}
     if lhs.type != rhs.type {return false}
+    if lhs.identityType != rhs.identityType {return false}
+    if lhs.identityID != rhs.identityID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1192,7 +1274,7 @@ extension Noxy_Device_RevokeDevice: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 extension Noxy_Device_RotateDeviceKeys: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".RotateDeviceKeys"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}new_pubkeys\0\u{3}wallet_address\0\u{1}signature\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}new_pubkeys\0\u{3}wallet_address\0\u{1}signature\0\u{3}identity_type\0\u{3}identity_id\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1201,8 +1283,10 @@ extension Noxy_Device_RotateDeviceKeys: SwiftProtobuf.Message, SwiftProtobuf._Me
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._newPubkeys) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.walletAddress) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._walletAddress) }()
       case 3: try { try decoder.decodeSingularBytesField(value: &self.signature) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.identityType) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.identityID) }()
       default: break
       }
     }
@@ -1216,19 +1300,27 @@ extension Noxy_Device_RotateDeviceKeys: SwiftProtobuf.Message, SwiftProtobuf._Me
     try { if let v = self._newPubkeys {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    if !self.walletAddress.isEmpty {
-      try visitor.visitSingularStringField(value: self.walletAddress, fieldNumber: 2)
-    }
+    try { if let v = self._walletAddress {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
     if !self.signature.isEmpty {
       try visitor.visitSingularBytesField(value: self.signature, fieldNumber: 3)
+    }
+    if self.identityType != .wallet {
+      try visitor.visitSingularEnumField(value: self.identityType, fieldNumber: 4)
+    }
+    if !self.identityID.isEmpty {
+      try visitor.visitSingularStringField(value: self.identityID, fieldNumber: 5)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   static func ==(lhs: Noxy_Device_RotateDeviceKeys, rhs: Noxy_Device_RotateDeviceKeys) -> Bool {
     if lhs._newPubkeys != rhs._newPubkeys {return false}
-    if lhs.walletAddress != rhs.walletAddress {return false}
+    if lhs._walletAddress != rhs._walletAddress {return false}
     if lhs.signature != rhs.signature {return false}
+    if lhs.identityType != rhs.identityType {return false}
+    if lhs.identityID != rhs.identityID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

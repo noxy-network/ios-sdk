@@ -2,7 +2,9 @@ import Foundation
 
 /// Device descriptor and public keys
 public struct NoxyDevice {
-    public let identityId: WalletAddress
+    /// Logical id aligned with relay `identity_id` / `wallet_address`.
+    public let identityId: String
+    public let relayIdentityType: NoxyRelayIdentityType
     public let appId: String
     public var isRevoked: Bool
     public let issuedAt: UInt64
@@ -11,7 +13,8 @@ public struct NoxyDevice {
     public var identitySignature: Data?
 
     public init(
-        identityId: WalletAddress,
+        identityId: String,
+        relayIdentityType: NoxyRelayIdentityType,
         appId: String,
         isRevoked: Bool,
         issuedAt: UInt64,
@@ -20,6 +23,7 @@ public struct NoxyDevice {
         identitySignature: Data?
     ) {
         self.identityId = identityId
+        self.relayIdentityType = relayIdentityType
         self.appId = appId
         self.isRevoked = isRevoked
         self.issuedAt = issuedAt

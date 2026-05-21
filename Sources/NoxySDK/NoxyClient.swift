@@ -28,7 +28,10 @@ public final class NoxyClient {
         self.decisionCryptoModule = NoxyDecisionCryptoModule(deviceModule: self.deviceModule)
     }
 
-    public var address: WalletAddress { identity.address }
+    public var logicalIdentityId: String { logicalIdentityIdOf(identity) }
+
+    /// Wallet address when identity is EOA or SCW; traps at runtime for other kinds — use ``logicalIdentityId`` instead.
+    public var address: WalletAddress { identity.walletAddress }
     public var isDeviceActive: Bool { deviceModule.isRevoked == false }
     public var isRelayConnected: Bool { networkModule.isConnected }
     public var isNetworkReady: Bool { networkModule.isReady }
@@ -42,14 +45,15 @@ public final class NoxyClient {
 
     /// Initialize: load or create device, connect to network, authenticate (and re-authenticate on every reconnect).
     public func initialize() async throws {
+        let lid = logicalIdentityIdOf(identity)
         var device: NoxyDevice?
-        if let loaded = try await deviceModule.load(identityId: identity.address, appId: networkOptions.appId) {
+        if let loaded = try await deviceModule.load(identityId: lid, appId: networkOptions.appId) {
             device = loaded
         } else {
             device = try await deviceModule.register(
                 appId: networkOptions.appId,
-                identityId: identity.address,
-                identitySigner: identity.signer
+                identity: identity,
+                appSigningSecret: networkOptions.appSigningSecret
             )
         }
 
@@ -65,7 +69,7 @@ public final class NoxyClient {
 
     /// Runs after each new gRPC transport: authenticate, register if needed, re-subscribe when ``on(handler:)`` was used.
     private func restoreRelaySession() async throws {
-        guard let device = try await deviceModule.load(identityId: identity.address, appId: networkOptions.appId),
+        guard let device = try await deviceModule.load(identityId: logicalIdentityIdOf(identity), appId: networkOptions.appId),
               !device.isRevoked else {
             throw NoxyError.initializationFailed("No device")
         }
@@ -73,13 +77,9 @@ public final class NoxyClient {
         let requiresRegistration = try await networkModule.authenticateDevice(device)
 
         if requiresRegistration {
-            guard let sig = device.identitySignature else {
-                throw NoxyError.initializationFailed("Device has no identity signature for relay registration")
-            }
-            try await networkModule.announceDevice(
-                devicePubkeys: (device.publicKey, device.pqPublicKey),
-                walletAddress: device.identityId,
-                signature: sig,
+            try await networkModule.announceRegister(
+                device: device,
+                signature: device.identitySignature ?? Data(),
                 apnToken: effectiveApnToken
             )
         }
@@ -101,7 +101,7 @@ public final class NoxyClient {
             throw NoxyError.general("Unable to revoke device")
         }
         try await deviceModule.revoke()
-        try await networkModule.revokeDevice(walletAddress: address, signature: sig)
+        try await networkModule.revokeDevice(logicalIdentityId: logicalIdentityIdOf(identity), signature: sig)
     }
 
     /// Rotate device keys locally and on relay
@@ -113,9 +113,12 @@ public final class NoxyClient {
         guard let pk = deviceModule.publicKey, let pqPk = deviceModule.pqPublicKey else {
             throw NoxyError.general("Unable to rotate keys")
         }
+        guard let device = deviceModule.device else {
+            throw NoxyError.general("Unable to rotate keys")
+        }
         try await networkModule.rotateDeviceKeys(
+            device: device,
             newPubkeys: (pk, pqPk),
-            walletAddress: address,
             signature: sig
         )
     }

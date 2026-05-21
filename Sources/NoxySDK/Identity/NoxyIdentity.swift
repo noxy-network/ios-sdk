@@ -3,7 +3,15 @@ import Foundation
 /// EVM-style wallet address (0x...)
 public typealias WalletAddress = String
 
-/// Supported identity types
+/// Relay-facing identity category (`wallet`, `email`, `phone`, `user_id`).
+public enum NoxyRelayIdentityType: String, Codable {
+    case wallet
+    case email
+    case phone
+    case userId = "user_id"
+}
+
+/// Wallet implementation kind (EOA vs SCW). Only meaningful for [NoxyRelayIdentityType.wallet].
 public enum NoxyIdentityType: String, Codable {
     case eoa = "eoa"
     case scw = "scw"
@@ -75,29 +83,63 @@ public struct NoxyScwWalletIdentity {
     }
 }
 
-/// Union of supported identity types
+/// Union of supported identities for the relay (wallet plus logical ids).
 public enum NoxyIdentity {
     case eoa(NoxyEoaWalletIdentity)
     case scw(NoxyScwWalletIdentity)
+    case email(email: String)
+    case phone(phone: String)
+    case userId(userId: String)
 
-    public var address: WalletAddress {
+    /// Wallet address when identity is EOA or SCW.
+    public var walletAddress: WalletAddress {
         switch self {
         case .eoa(let id): return id.address
         case .scw(let id): return id.address
+        case .email, .phone, .userId:
+            fatalError("walletAddress is only available for eoa or scw identity")
         }
     }
 
-    public var signer: SignerClosure {
+    /// Legacy alias for [walletAddress] on wallet identities.
+    public var address: WalletAddress { walletAddress }
+
+    /// EOA vs SCW when this is a wallet identity; otherwise `nil`.
+    public var walletKind: NoxyIdentityType? {
         switch self {
-        case .eoa(let id): return id.signer
-        case .scw(let id): return id.signer
+        case .eoa(let id): return id.type
+        case .scw(let id): return id.type
+        case .email, .phone, .userId: return nil
         }
     }
+}
 
-    public var type: NoxyIdentityType {
+public func relayIdentityTypeOf(_ identity: NoxyIdentity) -> NoxyRelayIdentityType {
+    switch identity {
+    case .eoa, .scw: return .wallet
+    case .email: return .email
+    case .phone: return .phone
+    case .userId: return .userId
+    }
+}
+
+public func logicalIdentityIdOf(_ identity: NoxyIdentity) -> String {
+    switch identity {
+    case .eoa(let id): return id.address
+    case .scw(let id): return id.address
+    case .email(let email): return email
+    case .phone(let phone): return phone
+    case .userId(let userId): return userId
+    }
+}
+
+extension NoxyRelayIdentityType {
+    var proto: Noxy_Device_IdentityType {
         switch self {
-        case .eoa: return .eoa
-        case .scw: return .scw
+        case .wallet: return .wallet
+        case .email: return .email
+        case .phone: return .phone
+        case .userId: return .userID
         }
     }
 }

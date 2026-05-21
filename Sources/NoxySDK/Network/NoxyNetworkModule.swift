@@ -365,53 +365,56 @@ public final class NoxyNetworkModule: @unchecked Sendable {
         return false
     }
 
-    /// Announce (register) device with relay
-    public func announceDevice(
-        devicePubkeys: (publicKey: Data, pqPublicKey: Data),
-        walletAddress: WalletAddress,
-        signature: Data,
-        apnToken: String? = nil
-    ) async throws {
+    /// Register device on relay (`identity_type` + wallet vs logical id).
+    public func announceRegister(device: NoxyDevice, signature: Data, apnToken: String? = nil) async throws {
         var req = Noxy_Device_DeviceRequest()
         req.payload = .registerDevice(Noxy_Device_RegisterDevice.with { reg in
             reg.devicePubkeys = Noxy_Device_DevicePublicKeys.with { pk in
-                pk.publicKey = devicePubkeys.publicKey
-                pk.pqPublicKey = devicePubkeys.pqPublicKey
+                pk.publicKey = device.publicKey
+                pk.pqPublicKey = device.pqPublicKey
             }
-            reg.walletAddress = walletAddress
             reg.signature = signature
             reg.type = "ios"
+            reg.identityType = device.relayIdentityType.proto
+            switch device.relayIdentityType {
+            case .wallet:
+                reg.walletAddress = device.identityId
+                reg.identityID = ""
+            case .email, .phone, .userId:
+                reg.identityID = device.identityId
+                reg.clearWalletAddress()
+            }
             if let tok = apnToken, !tok.isEmpty {
                 reg.apnToken = tok
             }
         })
 
         let resp = try await sendAndWait(req)
-        guard case .registerDevice(let reg) = resp.payload else {
+        guard case .registerDevice(let regResp) = resp.payload else {
             if case .error(let e) = resp.payload {
                 throw NoxyError.general("Register failed: \(e.message)")
             }
             throw NoxyError.general("Unexpected register response")
         }
 
-        setNetworkDeviceId(reg.deviceID)
-        setSessionId(reg.sessionID)
+        setNetworkDeviceId(regResp.deviceID)
+        setSessionId(regResp.sessionID)
     }
 
-    /// Revoke device on relay
-    public func revokeDevice(walletAddress: WalletAddress, signature: Data) async throws {
+    /// Revoke on relay; `logicalIdentityId` is sent as proto `wallet_address` (semantic logical id).
+    public func revokeDevice(logicalIdentityId: String, signature: Data) async throws {
         var req = Noxy_Device_DeviceRequest()
         req.payload = .revokeDevice(Noxy_Device_RevokeDevice.with { rev in
-            rev.walletAddress = walletAddress
+            rev.walletAddress = logicalIdentityId
             rev.signature = signature
         })
         _ = try await sendAndWait(req)
     }
 
-    /// Rotate device keys on relay
+    /// Rotate device keys on relay.
     public func rotateDeviceKeys(
+        device: NoxyDevice,
         newPubkeys: (publicKey: Data, pqPublicKey: Data),
-        walletAddress: WalletAddress,
         signature: Data
     ) async throws {
         var req = Noxy_Device_DeviceRequest()
@@ -420,8 +423,16 @@ public final class NoxyNetworkModule: @unchecked Sendable {
                 pk.publicKey = newPubkeys.publicKey
                 pk.pqPublicKey = newPubkeys.pqPublicKey
             }
-            rot.walletAddress = walletAddress
             rot.signature = signature
+            rot.identityType = device.relayIdentityType.proto
+            switch device.relayIdentityType {
+            case .wallet:
+                rot.walletAddress = device.identityId
+                rot.identityID = ""
+            case .email, .phone, .userId:
+                rot.identityID = device.identityId
+                rot.clearWalletAddress()
+            }
         })
         _ = try await sendAndWait(req)
     }

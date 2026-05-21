@@ -10,11 +10,11 @@ final class DecisionDecryptionTests: XCTestCase {
         let storage = NoxyStorage(serviceName: "noxy-test-\(UUID().uuidString)")
         let deviceModule = NoxyDeviceModule(storage: storage, kyber: kyber)
 
-        _ = try await deviceModule.register(
-            appId: "test-app",
-            identityId: "0xtest",
-            identitySigner: nil
-        )
+        let identity = NoxyIdentity.eoa(NoxyEoaWalletIdentity(address: "0xtest") { _ in
+            Signature(bytes: Data(repeating: 1, count: 65))
+        })
+
+        _ = try await deviceModule.register(appId: "test-app", identity: identity, appSigningSecret: "test-app-signing-secret")
 
         guard let devicePqPublicKey = deviceModule.pqPublicKey else {
             XCTFail("Device should have pq public key")
